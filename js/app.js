@@ -680,7 +680,13 @@
           <h2>Sua conta</h2>
           <a class="small" href="privacidade.html">Privacidade e termos de uso</a>
           <button class="btn" data-act="logout">Sair da conta</button>
-          <button class="btn danger" data-act="excluir-usuario">${S.confirmExcluir ? 'Toque de novo: apaga sua conta para sempre' : 'Excluir minha conta e meus dados'}</button>
+          ${S.confirmExcluir ? `
+          <form class="form" data-form="excluir-usuario" style="border:1px solid var(--danger);border-radius:12px;padding:12px;gap:10px">
+            <b class="danger">Isso apaga a sua conta para sempre.</b>
+            <span class="small">Se você for a última pessoa da família, todas as contas, a lista e os investimentos também somem. Não dá para desfazer.</span>
+            <div class="field"><label for="conf-excluir">Para confirmar, digite EXCLUIR</label><input class="input" id="conf-excluir" name="confirmacao" autocomplete="off" autocapitalize="characters"></div>
+            <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn danger" type="submit">Excluir para sempre</button><button class="btn" type="button" data-act="cancelar-excluir-usuario">Cancelar</button></div>
+          </form>` : '<button class="btn danger" data-act="excluir-usuario">Excluir minha conta e meus dados</button>'}
           <span class="hint">Se você for a última pessoa da família, todas as contas, a lista e os investimentos da família também são apagados.</span>
         </section>
       </div>
@@ -861,12 +867,8 @@
     instalar: async () => { if (!S.installEvt) return; S.installEvt.prompt(); await S.installEvt.userChoice.catch(() => {}); S.installEvt = null; render(); },
     tema: (el) => { lsSet('casa-tema', el.dataset.v); aplicarTema(); render(); },
     'tema-toggle': () => { lsSet('casa-tema', temaEscuro() ? 'light' : 'dark'); aplicarTema(); render(); },
-    'excluir-usuario': async () => {
-      if (!S.confirmExcluir) { S.confirmExcluir = true; render(); return; }
-      S.confirmExcluir = false;
-      try { await API.excluirConta(); S.phase = 'auth'; S.authView = 'login'; S.familia = null; S.membro = null; render(); toast('Sua conta foi excluída.'); }
-      catch (e) { console.error(e); toast(traduzErro(e)); }
-    }
+    'excluir-usuario': () => { S.confirmExcluir = true; render(); const f = $('#conf-excluir'); if (f) f.focus(); },
+    'cancelar-excluir-usuario': () => { S.confirmExcluir = false; render(); }
   };
   document.addEventListener('click', (ev) => {
     const el = ev.target.closest('[data-act]'); if (!el) return;
@@ -940,6 +942,14 @@
       render(); const f = $('#novo-item'); if (f) f.focus();
       form.reset();
     },
+    async 'excluir-usuario'(fd) {
+      if (String(fd.get('confirmacao') || '').trim().toUpperCase() !== 'EXCLUIR') { toast('Digite EXCLUIR para confirmar.'); return; }
+      S.confirmExcluir = false;
+      await API.excluirConta();
+      S.phase = 'auth'; S.authView = 'login'; S.familia = null; S.membro = null;
+      TABLES.forEach((t) => { S.data[t] = []; });
+      render(); toast('Sua conta foi excluída.');
+    },
     async 'ajustes-familia'(fd) {
       const patch = {
         sobrenome: String(fd.get('sobrenome')).trim() || S.familia.sobrenome,
@@ -979,6 +989,7 @@
   function route() {
     const v = location.hash.replace('#', '');
     S.view = VIEWS.includes(v) ? v : 'painel';
+    S.confirmExcluir = false;
     if (S.sheet) closeSheet();
     if (S.phase === 'app') { render(); window.scrollTo(0, 0); }
   }
