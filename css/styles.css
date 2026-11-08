@@ -80,12 +80,12 @@ main {
 .bottomnav {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
   background: var(--bg); border-top: 1px solid var(--line);
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
-  padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  padding: 6px max(4px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(4px, env(safe-area-inset-left, 0px));
 }
 .navlink {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-  min-height: 52px; color: var(--muted); font-size: 12px; font-weight: 500; border-radius: 12px;
+  min-height: 52px; color: var(--muted); font-size: 11px; font-weight: 500; border-radius: 12px;
 }
 .navlink[aria-current="page"] { color: var(--accent-text); font-weight: 700; }
 .navlink svg { width: 22px; height: 22px; }

@@ -5,7 +5,7 @@
 
   const CFG = window.CASA_CONFIG || {};
   const DEMO = !CFG.SUPABASE_URL || !CFG.SUPABASE_ANON_KEY || !window.supabase;
-  const TABLES = ['contas', 'pagamentos', 'mercado_itens', 'aplicacoes', 'aportes'];
+  const TABLES = ['contas', 'pagamentos', 'mercado_itens', 'aplicacoes', 'aportes', 'desejos'];
 
   // ---------------------------------------------------------------- utilidades
   const $ = (s, r = document) => r.querySelector(s);
@@ -58,6 +58,9 @@
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
     sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
     moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
+    gift: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg>',
+    up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>',
+    down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
     ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>'
   };
   const brandName = (sobrenome, tag = 'span') => `<${tag} class="brand-name">Ca<span class="cif">$</span>a${sobrenome ? ` <small>${h(sobrenome)}</small>` : ''}</${tag}>`;
@@ -130,7 +133,12 @@
           mercado_itens: [it('Arroz 5 kg', 28.90), it('Feijão 1 kg', 8.50), it('Café 500 g', 18.90), it('Leite (12 un.)', 59.88),
             it('Carne', 120), it('Frango', 45), it('Frutas e verduras', 60), it('Produtos de limpeza', 55, false), it('Higiene', 48), it('Azeite', 32, false)],
           aplicacoes: [apl],
-          aportes: []
+          aportes: [],
+          desejos: [
+            { id: uuid(), familia_id: f.id, nome: 'Ar-condicionado do quarto', valor: 2200, prioridade: 'alta', ordem: 1, link: '', quem: 'Casa', comprado: false, comprado_em: null, criado_em: now() },
+            { id: uuid(), familia_id: f.id, nome: 'Sofá novo', valor: 3500, prioridade: 'media', ordem: 2, link: '', quem: 'Casa', comprado: false, comprado_em: null, criado_em: now() },
+            { id: uuid(), familia_id: f.id, nome: 'Air fryer', valor: 450, prioridade: 'baixa', ordem: 3, link: '', quem: 'Casa', comprado: false, comprado_em: null, criado_em: now() }
+          ]
         }
       };
     };
@@ -156,7 +164,7 @@
       async excluirConta() { db = { session: null }; save(); },
       async entrarFamilia() { db = seed(); save(); },
       async select(t) { return JSON.parse(JSON.stringify(db.tables?.[t] || [])); },
-      async insert(t, row) { db.tables[t].push({ criado_em: now(), ...row }); save(); },
+      async insert(t, row) { (db.tables[t] = db.tables[t] || []).push({ criado_em: now(), ...row }); save(); },
       async update(t, id, patch) { const r = db.tables[t].find((x) => x.id === id); if (r) Object.assign(r, patch); save(); },
       async remove(t, id) {
         db.tables[t] = db.tables[t].filter((x) => x.id !== id);
@@ -181,14 +189,15 @@
     mes: ym(),
     filtroContas: 'despesa',
     user: null, membro: null, familia: null, membros: [],
-    data: { contas: [], pagamentos: [], mercado_itens: [], aplicacoes: [], aportes: [] },
+    data: { contas: [], pagamentos: [], mercado_itens: [], aplicacoes: [], aportes: [], desejos: [] },
+    semDesejos: false,
     cdi: null,
     sheet: null,
     installEvt: null,
     pendingRender: false,
     msg: ''
   };
-  const VIEWS = ['painel', 'contas', 'mercado', 'reserva', 'ajustes'];
+  const VIEWS = ['painel', 'contas', 'mercado', 'desejos', 'reserva', 'ajustes'];
 
   // ---------------------------------------------------------------- cálculos
   function ativaNoMes(c, m) {
@@ -301,7 +310,9 @@
     S.user = mb.user; S.membro = mb.membro;
     if (!mb.membro) { S.phase = 'onboarding'; return; }
     S.familia = mb.familia; S.membros = mb.membros || [];
-    const res = await Promise.all(TABLES.map((t) => API.select(t)));
+    const res = await Promise.all(TABLES.map((t) => t === 'desejos'
+      ? API.select(t).then((r) => { S.semDesejos = false; return r; }).catch(() => { S.semDesejos = true; return []; })
+      : API.select(t)));
     TABLES.forEach((t, i) => { S.data[t] = res[i] || []; });
     S.phase = 'app';
   }
@@ -417,7 +428,7 @@
 
   // ---------------------------------------------------------------- app: estrutura
   function navLinks() {
-    const items = [['painel', 'Painel', I.home], ['contas', 'Contas', I.list], ['mercado', 'Mercado', I.cart], ['reserva', 'Reserva', I.trend]];
+    const items = [['painel', 'Painel', I.home], ['contas', 'Contas', I.list], ['mercado', 'Mercado', I.cart], ['desejos', 'Desejos', I.gift], ['reserva', 'Reserva', I.trend]];
     return items.map(([v, l, ic]) => `<a class="navlink" href="#${v}" ${S.view === v ? 'aria-current="page"' : ''}>${ic}<span>${l}</span></a>`).join('');
   }
   function monthSwitch() {
@@ -428,7 +439,7 @@
     ? `<button class="iconbtn" data-act="tema-toggle" aria-label="Usar tema claro" title="Tema claro">${I.sun}</button>`
     : `<button class="iconbtn" data-act="tema-toggle" aria-label="Usar tema escuro" title="Tema escuro">${I.moon}</button>`;
   function shell(inner) {
-    const titulos = { painel: 'Painel', contas: 'Contas', mercado: 'Mercado', reserva: 'Reserva', ajustes: 'Ajustes' };
+    const titulos = { painel: 'Painel', contas: 'Contas', mercado: 'Mercado', desejos: 'Desejos', reserva: 'Reserva', ajustes: 'Ajustes' };
     const showMonth = S.view === 'painel' || S.view === 'contas';
     return `${DEMO ? '<div class="demo-banner">Modo demonstração · dados de exemplo salvos só neste navegador</div>' : ''}
     <div class="shell">
@@ -447,7 +458,8 @@
       </div>
     </div>
     <nav class="bottomnav" aria-label="Menu">${navLinks()}</nav>
-    ${S.view === 'painel' || S.view === 'contas' ? `<button class="fab" data-act="nova-conta" aria-label="Nova conta">${I.plus}</button>` : ''}`;
+    ${S.view === 'painel' || S.view === 'contas' ? `<button class="fab" data-act="nova-conta" aria-label="Nova conta">${I.plus}</button>` : ''}
+    ${S.view === 'desejos' && !S.semDesejos ? `<button class="fab" data-act="novo-desejo" aria-label="Novo desejo">${I.plus}</button>` : ''}`;
   }
 
   // ---------------------------------------------------------------- Painel
@@ -505,6 +517,10 @@
           <div class="bar blue"><span style="width:${pctRes}%"></span></div>
           <span class="small muted">${rv.falta > 0 ? `Falta aportar <b class="blue num">${brl(rv.falta)}</b> este mês` : '<b class="green">Aporte do mês feito</b>'}</span>
         </a>
+        ${(() => { const d = desejosPendentes()[0]; if (!d) return ''; const m = mesesPara(d.valor);
+          return `<a class="card" href="#desejos" style="color:var(--fg)"><div class="row"><h2>Próximo desejo</h2><span class="small orange">Ver lista</span></div>
+          <div class="row"><span class="title" style="font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${h(d.nome)}</span><b class="num">${brl(d.valor)}</b></div>
+          <span class="small muted">${m.txt}</span></a>`; })()}
       </div>
     </div>`;
   }
@@ -574,6 +590,91 @@
   }
 
   // ---------------------------------------------------------------- Reserva
+  // ---------------------------------------------------------------- Desejos
+  const PRIO = { alta: ['Alta', 0], media: ['Média', 1], baixa: ['Baixa', 2] };
+  function desejosPendentes() {
+    return S.data.desejos.filter((d) => !d.comprado)
+      .sort((a, b) => (PRIO[a.prioridade]?.[1] ?? 1) - (PRIO[b.prioridade]?.[1] ?? 1) || (a.ordem || 0) - (b.ordem || 0) || String(a.criado_em).localeCompare(String(b.criado_em)));
+  }
+  function livrePorMes() {
+    // primeiro mês (de hoje até 6 meses à frente) em que sobra dinheiro livre depois do mercado e da reserva
+    const fixo = (Number(S.familia?.limite_mercado) || 0) + (Number(S.familia?.aporte_mensal) || 0);
+    let m = ym();
+    for (let i = 0; i < 7; i++, m = addMonths(m, 1)) {
+      const r = resumo(m);
+      if (!r.l.length) continue;
+      const livre = r.sobra - fixo;
+      if (livre > 0) return { livre, mes: m, atual: i === 0 };
+    }
+    return { livre: 0, mes: ym(), atual: true };
+  }
+  function mesesPara(valor) {
+    const { livre, mes, atual } = livrePorMes(); const v = Number(valor) || 0;
+    if (!v) return { n: 0, txt: 'Sem valor definido' };
+    if (livre <= 0) return { n: null, txt: 'Nos próximos meses não sobra dinheiro livre depois do mercado e da reserva' };
+    const n = Math.ceil(v / livre);
+    const quando = atual ? 'do mês' : `de ${MESES[Number(mes.slice(5)) - 1]} em diante`;
+    return { n, txt: n <= 1 ? `<b class="green">Cabe no livre ${quando}</b> (${brl(livre)})` : `Juntando o livre ${quando} (${brl(livre)}/mês), dá em <b class="green">${n} meses</b>` };
+  }
+  const linkSeguro = (u) => { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : ''; } catch { return ''; } };
+  function viewDesejos() {
+    if (S.semDesejos) return `<div class="card empty"><h2>Falta um passo no banco de dados</h2><p style="margin:0">Para usar a lista de desejos, rode o arquivo <b>supabase/atualizacao-3-desejos.sql</b> no SQL Editor do Supabase e recarregue o app.</p></div>`;
+    const pend = desejosPendentes();
+    const comprados = S.data.desejos.filter((d) => d.comprado).sort((a, b) => String(b.comprado_em || '').localeCompare(String(a.comprado_em || '')));
+    const total = sum(pend, (d) => d.valor);
+    const prox = pend[0];
+    const item = (d, i) => {
+      const link = linkSeguro(d.link);
+      const [plabel] = PRIO[d.prioridade] || PRIO.media;
+      return `<div class="item">
+        <button class="check" data-act="desejo-comprado" data-id="${d.id}" aria-label="Marcar como comprado: ${h(d.nome)}"></button>
+        <div class="body" data-act="editar-desejo" data-id="${d.id}" role="button" tabindex="0">
+          <span class="title">${i === 0 ? '<span class="orange">1º · </span>' : ''}${h(d.nome)}</span>
+          <span class="sub">${plabel} prioridade · ${h(d.quem || 'Casa')}${link ? ' · tem link' : ''}</span>
+        </div>
+        <div class="end"><span class="val num">${brl(d.valor)}</span>
+          <span style="display:flex;gap:0">${i > 0 ? `<button class="iconbtn" data-act="desejo-subir" data-id="${d.id}" aria-label="Subir ${h(d.nome)} na lista" style="width:36px;height:36px">${I.up}</button>` : ''}${i < pend.length - 1 ? `<button class="iconbtn" data-act="desejo-descer" data-id="${d.id}" aria-label="Descer ${h(d.nome)} na lista" style="width:36px;height:36px">${I.down}</button>` : ''}</span>
+        </div>
+      </div>`;
+    };
+    const m = prox ? mesesPara(prox.valor) : null;
+    return `
+      ${prox ? `<section class="card hero">
+        <span class="label">Próximo da lista</span>
+        <span class="mid">${h(prox.nome)}</span>
+        <span class="big num">${brl(prox.valor)}</span>
+        <span class="small">${m.txt}</span>
+        ${linkSeguro(prox.link) ? `<a class="small" href="${h(linkSeguro(prox.link))}" target="_blank" rel="noopener noreferrer">Abrir o link do produto</a>` : ''}
+      </section>` : ''}
+      <div class="pair">
+        <div class="card"><span class="small muted">Na lista</span><span class="mid num">${pend.length}</span></div>
+        <div class="card"><span class="small muted">Total</span><span class="mid num">${brl(total)}</span></div>
+      </div>
+      <div class="list">${pend.map(item).join('') || `<div class="card empty"><span>Nenhum desejo na lista ainda. Anote o que vocês querem comprar e em que ordem.</span><button class="btn primary" data-act="novo-desejo">${I.plus} Adicionar desejo</button></div>`}</div>
+      <p class="hint">Toque no quadrado quando comprar. Use as setas para mudar a ordem dentro da mesma prioridade. "Livre do mês" é o que sobra depois do mercado e do aporte na reserva.</p>
+      ${comprados.length ? `<section class="card"><h2>Já compramos</h2><div class="list">${comprados.map((d) => `<div class="item done">
+        <button class="check on" data-act="desejo-comprado" data-id="${d.id}" aria-label="Voltar para a lista: ${h(d.nome)}">${I.check}</button>
+        <div class="body" data-act="editar-desejo" data-id="${d.id}" role="button" tabindex="0"><span class="title">${h(d.nome)}</span><span class="sub">${d.comprado_em ? 'Comprado em ' + dateBR(d.comprado_em) : 'Comprado'}</span></div>
+        <span class="val num">${brl(d.valor)}</span></div>`).join('')}</div></section>` : ''}`;
+  }
+  function sheetDesejo() {
+    const d = S.sheet.draft; const editando = !!d.id;
+    const chips = (arr, key) => arr.map(([v, l]) => `<button type="button" class="chip" data-act="draft" data-k="${key}" data-v="${h(v)}" aria-pressed="${d[key] === v}">${h(l)}</button>`).join('');
+    return `<div class="sheet-head"><h2>${editando ? 'Editar desejo' : 'Novo desejo'}</h2><button class="iconbtn" data-act="fechar" aria-label="Fechar">${I.x}</button></div>
+      <form class="form" data-form="desejo">
+        <div class="field" style="align-items:center"><label for="d-valor">Quanto custa (mais ou menos)</label><input class="input bigvalue num" id="d-valor" name="valor" inputmode="decimal" value="${d.valor ? fmtNum(d.valor) : ''}" placeholder="0,00"></div>
+        <div class="field"><label for="d-nome">O que é</label><input class="input" id="d-nome" name="nome" value="${h(d.nome)}" placeholder="Ex.: Ar-condicionado do quarto" required></div>
+        <div class="field"><span class="lbl">Prioridade</span><div class="chips">${chips([['alta', 'Alta'], ['media', 'Média'], ['baixa', 'Baixa']], 'prioridade')}</div></div>
+        <div class="field"><span class="lbl">Para quem</span><div class="chips">${chips(quemOpcoes().map((q) => [q, q]), 'quem')}</div></div>
+        <div class="field"><label for="d-link">Link do produto (opcional)</label><input class="input" id="d-link" name="link" type="url" inputmode="url" value="${h(d.link)}" placeholder="https://..."></div>
+        ${S.msg ? `<p class="error" role="alert">${h(S.msg)}</p>` : ''}
+        <div class="sheet-foot">
+          <button class="btn primary" type="submit">Salvar</button>
+          ${editando ? `<button class="btn danger" type="button" data-act="apagar-desejo">${S.sheet.confirmDel ? 'Toque de novo para apagar' : 'Apagar'}</button>` : ''}
+        </div>
+      </form>`;
+  }
+
   function viewReserva() {
     const rv = reservaTotais();
     const proj = projecao(rv.estimado, rv.plano);
@@ -764,7 +865,7 @@
     let root = $('#sheet-root');
     if (!root) { root = document.createElement('div'); root.id = 'sheet-root'; document.body.appendChild(root); }
     if (!S.sheet) { root.innerHTML = ''; document.body.style.overflow = ''; return; }
-    const html = S.sheet.type === 'conta' ? sheetConta() : S.sheet.type === 'aporte' ? sheetAporte() : sheetAplicacao();
+    const html = S.sheet.type === 'conta' ? sheetConta() : S.sheet.type === 'aporte' ? sheetAporte() : S.sheet.type === 'desejo' ? sheetDesejo() : sheetAplicacao();
     root.innerHTML = `<div class="sheet-back" data-act="fechar-fora"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;
     document.body.style.overflow = 'hidden';
   }
@@ -788,7 +889,7 @@
     if (S.phase === 'auth') { app.innerHTML = authScreen(); return; }
     if (S.phase === 'recovery') { app.innerHTML = recoveryScreen(); return; }
     if (S.phase === 'onboarding') { app.innerHTML = onboardingScreen(); return; }
-    const views = { painel: viewPainel, contas: viewContas, mercado: viewMercado, reserva: viewReserva, ajustes: viewAjustes };
+    const views = { painel: viewPainel, contas: viewContas, mercado: viewMercado, desejos: viewDesejos, reserva: viewReserva, ajustes: viewAjustes };
     const scroll = window.scrollY;
     app.innerHTML = shell(views[S.view]());
     window.scrollTo(0, scroll);
@@ -849,6 +950,19 @@
     'item-toggle': (el) => { const i = S.data.mercado_itens.find((x) => x.id === el.dataset.id); if (!i) return; upd('mercado_itens', i.id, { ativo: !i.ativo }); render(); },
     'item-del': (el) => { del('mercado_itens', el.dataset.id); render(); },
     'novo-aporte': () => openSheet('aporte', { valor: S.familia?.aporte_mensal || 0 }),
+    'novo-desejo': () => openSheet('desejo', { nome: '', valor: 0, prioridade: 'media', quem: 'Casa', link: '' }),
+    'editar-desejo': (el) => { const d = S.data.desejos.find((x) => x.id === el.dataset.id); if (d) openSheet('desejo', { ...d, valor: Number(d.valor) }); },
+    'desejo-comprado': (el) => {
+      const d = S.data.desejos.find((x) => x.id === el.dataset.id); if (!d) return;
+      upd('desejos', d.id, d.comprado ? { comprado: false, comprado_em: null } : { comprado: true, comprado_em: todayISO() });
+      render(); if (!d.comprado) return; toast(`${d.nome} foi para "Já compramos".`);
+    },
+    'desejo-subir': (el) => moverDesejo(el.dataset.id, -1),
+    'desejo-descer': (el) => moverDesejo(el.dataset.id, 1),
+    'apagar-desejo': () => {
+      if (!S.sheet.confirmDel) { syncDraft(); S.sheet.confirmDel = true; renderSheet(); return; }
+      del('desejos', S.sheet.draft.id); closeSheet(); render(); toast('Desejo apagado.');
+    },
     'nova-aplicacao': () => openSheet('aplicacao', { nome: '', instituicao: '', pct_cdi: 100, saldo_base: 0 }),
     'editar-aplicacao': (el) => { const a = S.data.aplicacoes.find((x) => x.id === el.dataset.id); if (a) openSheet('aplicacao', { ...a }); },
     'excluir-aplicacao': () => {
@@ -891,6 +1005,22 @@
     }
   });
 
+  function moverDesejo(id, dir) {
+    const lista = desejosPendentes();
+    const i = lista.findIndex((d) => d.id === id); const j = i + dir;
+    if (i < 0 || j < 0 || j >= lista.length) return;
+    // renumera a lista inteira e troca os dois de lugar (passa para a prioridade do vizinho)
+    const nova = lista.slice(); [nova[i], nova[j]] = [nova[j], nova[i]];
+    const prioVizinho = lista[j].prioridade;
+    nova.forEach((d, k) => {
+      const patch = {};
+      if ((d.ordem || 0) !== k + 1) patch.ordem = k + 1;
+      if (d.id === id && d.prioridade !== prioVizinho) patch.prioridade = prioVizinho;
+      if (Object.keys(patch).length) upd('desejos', d.id, patch);
+    });
+    render();
+  }
+
   const forms = {
     async login(fd) { await API.signIn(fd.get('email').trim(), fd.get('senha')); await boot(); },
     async signup(fd) {
@@ -927,6 +1057,18 @@
       ins('aportes', { aplicacao_id: fd.get('aplicacao_id'), data: fd.get('data') || todayISO(), valor });
       closeSheet(); render(); toast('Aporte registrado.');
       loadCDI().then(safeRender);
+    },
+    async desejo(fd) {
+      syncDraft();
+      const d = S.sheet.draft;
+      const nome = String(fd.get('nome') || '').trim();
+      if (!nome) { S.msg = 'Escreva o que vocês querem comprar.'; renderSheet(); return; }
+      const link = String(fd.get('link') || '').trim();
+      if (link && !linkSeguro(link)) { S.msg = 'O link precisa começar com https://'; renderSheet(); return; }
+      const row = { nome, valor: parseMoney(fd.get('valor')), prioridade: d.prioridade || 'media', quem: d.quem || 'Casa', link };
+      if (d.id) upd('desejos', d.id, row);
+      else { row.ordem = (Math.max(0, ...S.data.desejos.map((x) => Number(x.ordem) || 0)) + 1); row.comprado = false; ins('desejos', row); }
+      closeSheet(); render(); toast(d.id ? 'Desejo atualizado.' : 'Desejo adicionado.');
     },
     async aplicacao(fd) {
       const d = S.sheet.draft;
