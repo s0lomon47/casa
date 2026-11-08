@@ -107,27 +107,27 @@
 
   // ---------------------------------------------------------------- backend: demonstração (só neste navegador)
   function demoBackend() {
-    const KEY = 'casa-demo-v1';
+    const KEY = 'casa-demo-v2';
     const now = () => new Date().toISOString();
+    // Família fictícia, com valores inventados, só para demonstração
     const seed = () => {
-      const f = { id: uuid(), sobrenome: 'Cunha', codigo_convite: 'DEMO42', limite_mercado: 700, aporte_mensal: 1000, meta_reserva: 11000 };
-      const me = { user_id: 'demo-user', familia_id: f.id, nome: 'Saymon', criado_em: now() };
+      const f = { id: uuid(), sobrenome: 'Silva', codigo_convite: 'DEMO42', limite_mercado: 900, aporte_mensal: 1000, meta_reserva: 15000 };
+      const me = { user_id: 'demo-user', familia_id: f.id, nome: 'Ana', criado_em: now() };
       const c = (nome, valor, natureza, tipo, quem, recorrencia = 'mensal', parcelas = null) =>
-        ({ id: uuid(), familia_id: f.id, nome, valor, natureza, tipo, quem, dia: 10, recorrencia, inicio: '2026-12', parcelas, fim: null, criado_em: now() });
-      const apl = { id: uuid(), familia_id: f.id, nome: 'Reserva de emergência', instituicao: 'CDB liquidez diária', pct_cdi: 100, saldo_base: 4390.75, data_base: todayISO(), base_atualizada_em: now(), criado_em: now() };
+        ({ id: uuid(), familia_id: f.id, nome, valor, natureza, tipo, quem, dia: 10, recorrencia, inicio: ym(), parcelas, fim: null, criado_em: now() });
+      const apl = { id: uuid(), familia_id: f.id, nome: 'Reserva de emergência', instituicao: 'CDB liquidez diária', pct_cdi: 100, saldo_base: 6500, data_base: todayISO(), base_atualizada_em: now(), criado_em: now() };
       const it = (nome, valor, ativo = true) => ({ id: uuid(), familia_id: f.id, nome, valor, ativo, criado_em: now() });
       return {
-        session: { user: { id: 'demo-user', email: 'demo@exemplo.com', user_metadata: { nome: 'Saymon' } } },
-        familia: f, membros: [me, { user_id: 'demo-2', familia_id: f.id, nome: 'Vanessa', criado_em: now() }],
+        session: { user: { id: 'demo-user', email: 'demo@exemplo.com', user_metadata: { nome: 'Ana' } } },
+        familia: f, membros: [me, { user_id: 'demo-2', familia_id: f.id, nome: 'João', criado_em: now() }],
         tables: {
           contas: [
-            c('Salário Vanessa', 3386, 'receita', 'Salário', 'Vanessa'), c('Salário Saymon', 2000, 'receita', 'Salário', 'Saymon'),
-            c('Apê', 165, 'receita', 'Outros', 'Casa'), c('Mãe', 73, 'receita', 'Outros', 'Casa'),
-            c('Aluguel', 1200, 'despesa', 'Fixa', 'Casa'), c('Caixa - Financiamento', 530, 'despesa', 'Fixa', 'Casa'),
-            c('Faculdade', 286, 'despesa', 'Fixa', 'Casa'), c('Amil', 207, 'despesa', 'Fixa', 'Casa'),
-            c('Internet', 120, 'despesa', 'Fixa', 'Casa'), c('MRV', 656, 'despesa', 'Parcela', 'Casa', 'parcelado', 4),
-            c('Shopee', 80.94, 'despesa', 'Cartão', 'Saymon'), c('Shopee', 214.30, 'despesa', 'Cartão', 'Vanessa'),
-            c('Mercado Pago', 250, 'despesa', 'Cartão', 'Saymon', 'unica')
+            c('Salário Ana', 4200, 'receita', 'Salário', 'Ana'), c('Salário João', 3500, 'receita', 'Salário', 'João'),
+            c('Aluguel', 1500, 'despesa', 'Fixa', 'Casa'), c('Condomínio', 380, 'despesa', 'Fixa', 'Casa'),
+            c('Energia', 210, 'despesa', 'Fixa', 'Casa'), c('Internet', 110, 'despesa', 'Fixa', 'Casa'),
+            c('Plano de saúde', 420, 'despesa', 'Fixa', 'Casa'), c('Escola', 600, 'despesa', 'Fixa', 'Casa'),
+            c('Financiamento do carro', 890, 'despesa', 'Parcela', 'Casa', 'parcelado', 10),
+            c('Cartão', 650, 'despesa', 'Cartão', 'Ana'), c('Streaming', 55, 'despesa', 'Cartão', 'João')
           ],
           pagamentos: [],
           mercado_itens: [it('Arroz 5 kg', 28.90), it('Feijão 1 kg', 8.50), it('Café 500 g', 18.90), it('Leite (12 un.)', 59.88),
@@ -409,7 +409,7 @@
       ${criar ? `
       <div class="preview-name"><img src="icons/icon.svg" alt=""><span class="brand-name">Ca<span class="cif">$</span>a <small id="pv-sobrenome">Sua família</small></span></div>
       <form class="form" data-form="criar-familia">
-        <div class="field"><label for="ob-sobrenome">Sobrenome da família</label><input class="input" id="ob-sobrenome" name="sobrenome" placeholder="Ex.: Cunha" required data-live="sobrenome"></div>
+        <div class="field"><label for="ob-sobrenome">Sobrenome da família</label><input class="input" id="ob-sobrenome" name="sobrenome" placeholder="Ex.: Silva" required data-live="sobrenome"></div>
         <div class="field"><label for="ob-nome">Seu nome</label><input class="input" id="ob-nome" name="nome" value="${h(nome)}" required></div>
         ${S.msg ? `<p class="error" role="alert">${h(S.msg)}</p>` : ''}
         <button class="btn primary block" type="submit">Criar minha Ca$a</button>

@@ -4,11 +4,13 @@
 <p align="center"><b>As contas da família num lugar só.</b><br>O que vence, o que sobra e o que está investido. O que um lança, o outro vê na hora.</p>
 
 <p align="center">
-  <img src="docs/celular-painel.png" width="200" alt="Painel">
-  <img src="docs/celular-contas.png" width="200" alt="Contas do mês">
-  <img src="docs/celular-mercado.png" width="200" alt="Lista do mercado">
-  <img src="docs/celular-reserva.png" width="200" alt="Reserva e projeção">
+  <img src="docs/celular-painel.png" width="180" alt="Painel">
+  <img src="docs/celular-contas.png" width="180" alt="Contas do mês">
+  <img src="docs/celular-mercado.png" width="180" alt="Lista do mercado">
+  <img src="docs/celular-desejos.png" width="180" alt="Lista de desejos">
+  <img src="docs/celular-reserva.png" width="180" alt="Reserva e projeção">
 </p>
+<p align="center"><i>Telas com dados de exemplo (família fictícia).</i></p>
 
 ---
 
@@ -17,9 +19,10 @@
 - **Painel do mês:** quanto sobra (em verde), dividido em 1º mercado, 2º reserva e 3º livre.
 - **Contas:** fixas, cartões, parcelas e receitas. As que se repetem aparecem sozinhas nos próximos meses; parcelas contam até acabar. Um toque marca como pago.
 - **Vencimentos:** cada conta tem o dia de vencimento; o app avisa o que vence em até 3 dias e o que está atrasado.
+- **Lista de desejos:** o que a família quer comprar, por prioridade, com a previsão de quando cabe no orçamento.
 - **Lista do mercado:** liga e desliga itens, troca o preço e vê na hora quanto sobra do limite do mês.
 - **Reserva e investimentos (em azul):** registre os aportes; o rendimento é estimado com o CDI do dia, direto do Banco Central. Projeção de 12 meses até a meta.
-- **Família:** cada casa cria a sua com o sobrenome ("Ca$a Cunha") e convida os outros com um código.
+- **Família:** cada casa cria a sua com o sobrenome ("Ca$a Silva") e convida os outros com um código.
 - **Funciona no PC e no celular:** no navegador ou instalado na tela inicial (Android e iPhone). Tema escuro e claro.
 - **Privacidade:** cada família só enxerga os próprios dados; qualquer pessoa pode excluir a própria conta pelo app.
 
@@ -46,7 +49,7 @@ HTML, CSS e JavaScript puros, sem etapa de build. Banco, login e atualização a
 | `index.html`, `js/app.js`, `css/styles.css` | O app (telas, regras e visual) |
 | `js/config.js` | Endereço e chave pública do seu Supabase |
 | `supabase/schema.sql` | Tabelas, segurança por família, convite e exclusão de conta |
-| `supabase/seed-familia-cunha.sql` | Exemplo de como lançar contas iniciais por SQL |
+| `supabase/exemplo-contas-iniciais.sql` | Exemplo (fictício) de como lançar contas iniciais por SQL |
 | `scripts/gerar-config.js`, `netlify.toml` | Preenchem o `config.js` a partir das variáveis do Netlify |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Instalar no celular como app |
 | `privacidade.html` | Política de privacidade e termos de uso |

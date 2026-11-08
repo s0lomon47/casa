@@ -37,7 +37,7 @@ Tudo gratuito. Leva uns 20 minutos.
 
 1. Abra o endereço › **Criar conta** › **Criar família** com o seu sobrenome.
 2. Em **Ajustes** está o **código de convite**: mande para quem mora com você. A pessoa cria a conta e escolhe **Tenho um código**.
-3. Para lançar muitas contas de uma vez por SQL, use `supabase/seed-familia-cunha.sql` como modelo (troque o sobrenome e as contas).
+3. Para lançar muitas contas de uma vez por SQL, use `supabase/exemplo-contas-iniciais.sql` como modelo (troque o sobrenome e as contas).
 
 ## 4. Instalar no celular
 
