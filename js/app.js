@@ -680,7 +680,7 @@
           <h2>Sua conta</h2>
           <a class="small" href="privacidade.html">Privacidade e termos de uso</a>
           <button class="btn" data-act="logout">Sair da conta</button>
-          <button class="btn danger" data-act="excluir-conta">${S.confirmExcluir ? 'Toque de novo: apaga sua conta para sempre' : 'Excluir minha conta e meus dados'}</button>
+          <button class="btn danger" data-act="excluir-usuario">${S.confirmExcluir ? 'Toque de novo: apaga sua conta para sempre' : 'Excluir minha conta e meus dados'}</button>
           <span class="hint">Se você for a última pessoa da família, todas as contas, a lista e os investimentos da família também são apagados.</span>
         </section>
       </div>
@@ -861,7 +861,7 @@
     instalar: async () => { if (!S.installEvt) return; S.installEvt.prompt(); await S.installEvt.userChoice.catch(() => {}); S.installEvt = null; render(); },
     tema: (el) => { lsSet('casa-tema', el.dataset.v); aplicarTema(); render(); },
     'tema-toggle': () => { lsSet('casa-tema', temaEscuro() ? 'light' : 'dark'); aplicarTema(); render(); },
-    'excluir-conta': async () => {
+    'excluir-usuario': async () => {
       if (!S.confirmExcluir) { S.confirmExcluir = true; render(); return; }
       S.confirmExcluir = false;
       try { await API.excluirConta(); S.phase = 'auth'; S.authView = 'login'; S.familia = null; S.membro = null; render(); toast('Sua conta foi excluída.'); }
