@@ -3,6 +3,11 @@
 const fs = require('fs');
 const path = require('path');
 
+// Versão publicada (o app recarrega sozinho quando ela muda)
+const versao = process.env.COMMIT_REF || process.env.DEPLOY_ID || String(Date.now());
+fs.writeFileSync(path.join(__dirname, '..', 'version.json'), JSON.stringify({ versao }) + '\n');
+console.log('[Ca$a] version.json =', versao);
+
 const url = (process.env.SUPABASE_URL || '').trim().replace(/\/(rest|auth)\/v1.*$/, '').replace(/\/+$/, '');
 const key = (process.env.SUPABASE_ANON_KEY || '').trim();
 const contato = (process.env.CONTATO || '').trim();

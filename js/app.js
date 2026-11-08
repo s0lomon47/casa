@@ -90,7 +90,7 @@
         return { user, membro: m, familia, membros };
       },
       async criarFamilia(sobrenome, nome) { ok(await sb.rpc('criar_familia', { p_sobrenome: sobrenome, p_nome: nome })); },
-      async excluirConta() { ok(await sb.rpc('excluir_minha_conta')); await sb.auth.signOut(); },
+      async excluirConta() { ok(await sb.rpc('excluir_minha_conta', { p_confirmacao: 'EXCLUIR' })); await sb.auth.signOut(); },
       async entrarFamilia(codigo, nome) { ok(await sb.rpc('entrar_familia', { p_codigo: codigo, p_nome: nome })); },
       async select(t) { return ok(await sb.from(t).select('*').order('criado_em')); },
       async insert(t, row) { ok(await sb.from(t).insert(row)); },
@@ -778,7 +778,7 @@
     }
   }
   function openSheet(type, draft) { S.msg = ''; S.sheet = { type, draft, confirmDel: false }; renderSheet(); setTimeout(() => { const f = $('#sheet-root input:not([type=hidden])'); if (f && matchMedia('(min-width: 900px)').matches) f.focus(); }, 30); }
-  function closeSheet() { S.sheet = null; S.msg = ''; renderSheet(); if (S.pendingRender) render(); }
+  function closeSheet() { S.sheet = null; S.msg = ''; renderSheet(); if (S.pendingRender) render(); if (typeof checarVersao === 'function') setTimeout(checarVersao, 500); }
 
   // ---------------------------------------------------------------- render
   function render() {
@@ -1020,7 +1020,25 @@
     if (ev === 'PASSWORD_RECOVERY') { S.phase = 'recovery'; render(); }
     if (ev === 'SIGNED_OUT') { S.phase = 'auth'; render(); }
   });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.phase === 'app') scheduleReload(); });
+  // Versão nova publicada? Recarrega a página (sem atrapalhar quem está preenchendo algo)
+  let versaoAtual = null; let precisaRecarregar = false;
+  async function checarVersao() {
+    try {
+      const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+      if (!r.ok) return;
+      const v = (await r.json()).versao;
+      if (!versaoAtual) { versaoAtual = v; return; }
+      if (v && v !== versaoAtual) precisaRecarregar = true;
+    } catch { /* sem internet */ }
+    if (precisaRecarregar && !S.sheet && !(document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName))) location.reload();
+  }
+  checarVersao();
+  setInterval(checarVersao, 5 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    checarVersao();
+    if (S.phase === 'app') scheduleReload();
+  });
 
   aplicarTema();
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {

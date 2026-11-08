@@ -11,3 +11,11 @@
   for = "/js/config.js"
   [headers.values]
     Cache-Control = "no-cache"
+[[headers]]
+  for = "/version.json"
+  [headers.values]
+    Cache-Control = "no-cache"
+[[headers]]
+  for = "/js/app.js"
+  [headers.values]
+    Cache-Control = "no-cache"
