@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Privacidade e termos · Ca$a</title>
+<meta name="theme-color" content="#0D0D0D">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+<link rel="shortcut icon" href="favicon.ico">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap">
+<link rel="stylesheet" href="css/styles.css">
+<style>
+  .doc { max-width: 680px; margin: 0 auto; padding: calc(24px + env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px)) 48px max(20px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 14px; }
+  .doc h1 { font-size: 32px; }
+  .doc h2 { font-size: 19px; margin-top: 18px; }
+  .doc p, .doc li { color: var(--fg); line-height: 1.6; margin: 0; }
+  .doc ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+  .doc .muted { color: var(--muted); }
+</style>
+<script>
+  try { const t = localStorage.getItem('casa-tema'); if (t && t !== 'auto') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
+</head>
+<body>
+<article class="doc">
+  <a href="./" class="brand" style="color:var(--fg)"><img src="icons/icon.svg" alt="" width="36" height="36"><span class="brand-name">Ca<span class="cif">$</span>a</span></a>
+  <h1>Privacidade e termos de uso</h1>
+  <p class="muted">Última atualização: 8 de novembro de 2026</p>
+
+  <h2>O que é o Ca$a</h2>
+  <p>Um app gratuito para a família organizar contas, a lista do mercado e a reserva. Ele não é banco, não movimenta dinheiro e não se conecta à sua conta bancária. Tudo o que aparece nele foi digitado por você ou pelas pessoas da sua família.</p>
+
+  <h2>Quais dados guardamos</h2>
+  <ul>
+    <li>Seu nome, e-mail e senha (a senha fica criptografada; ninguém consegue lê-la).</li>
+    <li>O sobrenome da família e quem faz parte dela.</li>
+    <li>O que vocês lançam: contas, receitas, datas de vencimento, lista do mercado, aplicações e aportes.</li>
+  </ul>
+  <p>Não pedimos CPF, número de cartão, dados de conta bancária ou senha de banco. Não digite esses dados no app.</p>
+
+  <h2>Para que usamos</h2>
+  <p>Só para o app funcionar: mostrar as contas da sua família, somar valores e avisar vencimentos. Não vendemos, não alugamos e não compartilhamos seus dados com anunciantes. Não há anúncios.</p>
+
+  <h2>Quem vê os dados da sua família</h2>
+  <p>Só quem entrou na família com o código de convite. Cada família fica separada no banco de dados; outra família não consegue ver as suas contas. O responsável técnico pelo app só acessa os dados se for necessário para corrigir um problema ou se a lei exigir.</p>
+
+  <h2>Onde ficam guardados</h2>
+  <p>No Supabase, um serviço de banco de dados na nuvem, com o projeto hospedado em São Paulo. O site é servido pelo Netlify. O app consulta o site do Banco Central apenas para buscar a taxa do CDI; nenhum dado seu vai para lá.</p>
+
+  <h2>Seus direitos (LGPD)</h2>
+  <ul>
+    <li><b>Ver e corrigir:</b> tudo o que está guardado aparece e pode ser editado dentro do app.</li>
+    <li><b>Apagar:</b> em Ajustes › Excluir minha conta. Sua conta é apagada na hora. Se você for a última pessoa da família, todos os dados da família também são apagados.</li>
+    <li><b>Dúvidas e pedidos:</b> <span id="contato">pelo contato do responsável pelo app</span>.</li>
+  </ul>
+
+  <h2>Termos de uso</h2>
+  <ul>
+    <li>O app é oferecido de graça, como está, sem garantia de funcionamento contínuo.</li>
+    <li>Os valores de rendimento e projeção são estimativas e não são recomendação de investimento. Confira sempre o extrato do seu banco.</li>
+    <li>Você é responsável pelo que lança e por guardar sua senha. Não compartilhe sua conta com pessoas de fora da família.</li>
+    <li>Podemos atualizar estes termos; a data no topo mostra a última mudança.</li>
+  </ul>
+
+  <p style="margin-top:20px"><a class="btn primary" href="./">Voltar para o app</a></p>
+</article>
+<script src="js/config.js"></script>
+<script>
+  (function () {
+    var c = (window.CASA_CONFIG || {}).CONTATO;
+    if (c) { var el = document.getElementById('contato'); el.textContent = ''; el.appendChild(document.createTextNode('pelo e-mail ')); var b = document.createElement('b'); b.textContent = c; el.appendChild(b); }
+  })();
+</script>
+</body>
+</html>
