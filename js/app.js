@@ -446,7 +446,7 @@
       <aside class="sidebar">
         <div class="brand"><img src="icons/icon.svg" alt="">${brandName(S.familia?.sobrenome)}</div>
         <nav aria-label="Menu">${navLinks()}<a class="navlink" href="#ajustes" ${S.view === 'ajustes' ? 'aria-current="page"' : ''}>${I.gear}<span>Ajustes</span></a></nav>
-        <div class="side-foot"><button class="btn primary" data-act="nova-conta">${I.plus} Nova conta</button><span>Olá, ${h(S.membro?.nome || '')}</span></div>
+        <div class="side-foot">${S.view === 'desejos' && !S.semDesejos ? `<button class="btn primary" data-act="novo-desejo">${I.plus} Novo desejo</button>` : `<button class="btn primary" data-act="nova-conta">${I.plus} Nova conta</button>`}<span>Olá, ${h(S.membro?.nome || '')}</span></div>
       </aside>
       <div class="content">
         <header class="topbar">
@@ -646,6 +646,7 @@
         <span class="small">${m.txt}</span>
         ${linkSeguro(prox.link) ? `<a class="small" href="${h(linkSeguro(prox.link))}" target="_blank" rel="noopener noreferrer">Abrir o link do produto</a>` : ''}
       </section>` : ''}
+      <button class="btn primary" data-act="novo-desejo" style="align-self:flex-start">${I.plus} Adicionar desejo</button>
       <div class="pair">
         <div class="card"><span class="small muted">Na lista</span><span class="mid num">${pend.length}</span></div>
         <div class="card"><span class="small muted">Total</span><span class="mid num">${brl(total)}</span></div>
