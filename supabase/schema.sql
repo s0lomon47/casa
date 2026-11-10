@@ -55,9 +55,13 @@ create table if not exists public.pagamentos (
   conta_id    uuid not null references public.contas(id) on delete cascade,
   mes         text not null check (mes ~ '^\d{4}-\d{2}$'),
   valor       numeric(12,2),
+  pago        boolean not null default true,   -- falso = só guarda um valor diferente para o mês
+  ajustado    boolean not null default false,  -- valor digitado só para este mês
   criado_em   timestamptz not null default now(),
   unique (conta_id, mes)
 );
+alter table public.pagamentos add column if not exists pago     boolean not null default true;
+alter table public.pagamentos add column if not exists ajustado boolean not null default false;
 
 -- Lista do mercado
 create table if not exists public.mercado_itens (
@@ -65,9 +69,15 @@ create table if not exists public.mercado_itens (
   familia_id  uuid not null default public.minha_familia() references public.familias(id) on delete cascade,
   nome        text not null,
   valor       numeric(12,2) not null default 0,
-  ativo       boolean not null default true,
+  ativo       boolean not null default true,   -- true = na lista de compras; false = em casa (estoque)
+  categoria   text not null default '',
+  quantidade  int  not null default 1,
+  volta_em    text,                            -- mês 'AAAA-MM' em que volta sozinho para a lista
   criado_em   timestamptz not null default now()
 );
+alter table public.mercado_itens add column if not exists categoria  text not null default '';
+alter table public.mercado_itens add column if not exists quantidade int  not null default 1;
+alter table public.mercado_itens add column if not exists volta_em   text;
 
 -- Onde o dinheiro está investido
 create table if not exists public.aplicacoes (

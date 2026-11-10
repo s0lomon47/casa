@@ -18,9 +18,9 @@
 
 - **Painel do mês:** quanto sobra (em verde), dividido em 1º mercado, 2º reserva e 3º livre.
 - **Contas:** fixas, cartões, parcelas e receitas. As que se repetem aparecem sozinhas nos próximos meses; parcelas contam até acabar. Um toque marca como pago.
-- **Vencimentos:** cada conta tem o dia de vencimento; o app avisa o que vence em até 3 dias e o que está atrasado.
+- **Vencimentos:** cada conta tem o dia de vencimento; o app abre no mês que ainda tem conta em aberto, avisa o que vence em até 3 dias e o que está atrasado. Dá para mudar o valor só de um mês (conta de luz, cartão).
 - **Lista de desejos:** o que a família quer comprar, por prioridade, com a previsão de quando cabe no orçamento.
-- **Lista do mercado:** liga e desliga itens, troca o preço e vê na hora quanto sobra do limite do mês.
+- **Lista do mercado:** itens por categoria e em ordem alfabética, com quantidade e total sempre visível no topo. O que você já tem vai para "Em casa" (estoque), sai da soma e pode voltar sozinho para a lista no mês que você escolher.
 - **Reserva e investimentos (em azul):** registre os aportes; o rendimento é estimado com o CDI do dia, direto do Banco Central. Projeção de 12 meses até a meta.
 - **Família:** cada casa cria a sua com o sobrenome ("Ca$a Silva") e convida os outros com um código.
 - **Funciona no PC e no celular:** no navegador ou instalado na tela inicial (Android e iPhone). Tema escuro e claro.

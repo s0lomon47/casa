@@ -96,6 +96,7 @@
       async excluirConta() { ok(await sb.rpc('excluir_minha_conta', { p_confirmacao: 'EXCLUIR' })); await sb.auth.signOut(); },
       async entrarFamilia(codigo, nome) { ok(await sb.rpc('entrar_familia', { p_codigo: codigo, p_nome: nome })); },
       async select(t) { return ok(await sb.from(t).select('*').order('criado_em')); },
+      async temColunas(t, cols) { const { error } = await sb.from(t).select(cols).limit(1); return !error; },
       async insert(t, row) { ok(await sb.from(t).insert(row)); },
       async update(t, id, patch) { ok(await sb.from(t).update(patch).eq('id', id)); },
       async remove(t, id) { ok(await sb.from(t).delete().eq('id', id)); },
@@ -107,7 +108,7 @@
 
   // ---------------------------------------------------------------- backend: demonstração (só neste navegador)
   function demoBackend() {
-    const KEY = 'casa-demo-v2';
+    const KEY = 'casa-demo-v3';
     const now = () => new Date().toISOString();
     // Família fictícia, com valores inventados, só para demonstração
     const seed = () => {
@@ -116,7 +117,7 @@
       const c = (nome, valor, natureza, tipo, quem, recorrencia = 'mensal', parcelas = null) =>
         ({ id: uuid(), familia_id: f.id, nome, valor, natureza, tipo, quem, dia: 10, recorrencia, inicio: ym(), parcelas, fim: null, criado_em: now() });
       const apl = { id: uuid(), familia_id: f.id, nome: 'Reserva de emergência', instituicao: 'CDB liquidez diária', pct_cdi: 100, saldo_base: 6500, data_base: todayISO(), base_atualizada_em: now(), criado_em: now() };
-      const it = (nome, valor, ativo = true) => ({ id: uuid(), familia_id: f.id, nome, valor, ativo, criado_em: now() });
+      const it = (nome, valor, ativo = true, quantidade = 1) => ({ id: uuid(), familia_id: f.id, nome, valor, ativo, categoria: '', quantidade, volta_em: null, criado_em: now() });
       return {
         session: { user: { id: 'demo-user', email: 'demo@exemplo.com', user_metadata: { nome: 'Ana' } } },
         familia: f, membros: [me, { user_id: 'demo-2', familia_id: f.id, nome: 'João', criado_em: now() }],
@@ -130,7 +131,7 @@
             c('Cartão', 650, 'despesa', 'Cartão', 'Ana'), c('Streaming', 55, 'despesa', 'Cartão', 'João')
           ],
           pagamentos: [],
-          mercado_itens: [it('Arroz 5 kg', 28.90), it('Feijão 1 kg', 8.50), it('Café 500 g', 18.90), it('Leite (12 un.)', 59.88),
+          mercado_itens: [it('Arroz 5 kg', 28.90), it('Feijão 1 kg', 8.50), it('Café 500 g', 18.90), it('Leite', 59.88, true, 12),
             it('Carne', 120), it('Frango', 45), it('Frutas e verduras', 60), it('Produtos de limpeza', 55, false), it('Higiene', 48), it('Azeite', 32, false)],
           aplicacoes: [apl],
           aportes: [],
@@ -164,6 +165,7 @@
       async excluirConta() { db = { session: null }; save(); },
       async entrarFamilia() { db = seed(); save(); },
       async select(t) { return JSON.parse(JSON.stringify(db.tables?.[t] || [])); },
+      async temColunas() { return true; },
       async insert(t, row) { (db.tables[t] = db.tables[t] || []).push({ criado_em: now(), ...row }); save(); },
       async update(t, id, patch) { const r = db.tables[t].find((x) => x.id === id); if (r) Object.assign(r, patch); save(); },
       async remove(t, id) {
@@ -191,6 +193,8 @@
     user: null, membro: null, familia: null, membros: [],
     data: { contas: [], pagamentos: [], mercado_itens: [], aplicacoes: [], aportes: [], desejos: [] },
     semDesejos: false,
+    v4: false,            // banco já tem as colunas da atualização 4?
+    abaMercado: 'lista',  // lista | casa
     cdi: null,
     sheet: null,
     installEvt: null,
@@ -212,7 +216,7 @@
       const p = S.data.pagamentos.find((x) => x.conta_id === c.id && x.mes === m);
       const dia = Math.min(Number(c.dia) || 1, daysInMonth(m));
       return {
-        ...c, dia, pago: !!p, pagId: p ? p.id : null,
+        ...c, dia, mes: m, pago: !!p && p.pago !== false, pagId: p ? p.id : null, ajustado: !!(p && p.ajustado),
         valorMes: p && p.valor != null ? Number(p.valor) : Number(c.valor),
         parcelaTxt: c.recorrencia === 'parcelado' ? `${diffMonths(c.inicio, m) + 1}/${c.parcelas}` : ''
       };
@@ -227,15 +231,53 @@
     return { l, rec, des, R, D, sobra: R - D, aPagar, pago: D - aPagar };
   }
   function prazo(c, m) {
-    // dias até vencer (só faz sentido no mês atual)
-    if (m !== ym()) return null;
+    // dias até vencer: negativo = atrasada; null = mês futuro
+    const hoje = ym();
+    if (m > hoje) return null;
+    if (m < hoje) return -999;
     return c.dia - new Date().getDate();
   }
+  // Despesas em aberto que pedem atenção: atrasadas (de qualquer mês até 1 ano atrás) e as que vencem em até 3 dias
   function vencendo() {
-    const m = ym();
-    return contasDoMes(m).filter((c) => c.natureza === 'despesa' && !c.pago)
-      .map((c) => ({ ...c, dias: prazo(c, m) })).filter((c) => c.dias <= 3).sort((a, b) => a.dias - b.dias);
+    const hoje = ym(); const out = [];
+    const inicios = S.data.contas.map((c) => c.inicio).sort();
+    let m = inicios[0] && inicios[0] < hoje ? inicios[0] : hoje;
+    if (diffMonths(m, hoje) > 12) m = addMonths(hoje, -12);
+    for (; m <= hoje; m = addMonths(m, 1)) {
+      for (const c of contasDoMes(m)) {
+        if (c.natureza !== 'despesa' || c.pago) continue;
+        const dias = prazo(c, m);
+        if (dias !== null && dias <= 3) out.push({ ...c, dias });
+      }
+    }
+    return out.sort((a, b) => a.mes.localeCompare(b.mes) || a.dias - b.dias);
   }
+  // Mês mais antigo (antes do atual) que ainda tem conta sem pagar
+  function mesComPendencia() { const v = vencendo().find((c) => c.mes < ym()); return v ? v.mes : null; }
+  const CATS = ['Alimentos', 'Carnes e frios', 'Hortifrúti', 'Padaria e laticínios', 'Bebidas', 'Higiene', 'Limpeza', 'Casa', 'Pet', 'Outros'];
+  const norm = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  // Palavras que indicam a categoria ("=" na frente = palavra inteira)
+  const CAT_KW = [
+    ['Limpeza', ['agua sanitaria', 'detergente', 'sabao', 'amaciante', 'desinfetante', 'esponja', 'limpeza', 'alvejante', 'multiuso', 'saco de lixo', 'lustra', 'limpa', 'candida', 'bombril', '=pano']],
+    ['Alimentos', ['leite condensado', 'creme de leite', 'leite em po', 'arroz', 'feijao', 'macarrao', 'massa', 'farinha', 'acucar', '=sal', 'oleo', 'azeite', 'cafe', 'molho', 'tempero', 'biscoito', 'bolacha', 'cereal', 'aveia', 'milho', 'ervilha', 'extrato', 'achocolatado', 'miojo', 'granola', '=mel', 'vinagre', 'maionese', 'ketchup', 'mostarda', 'atum', 'sardinha', '=ovo', '=ovos', 'chocolate', 'pipoca', 'lentilha', 'fuba', 'polvilho', 'gelatina', '=doce', 'salgadinho']],
+    ['Carnes e frios', ['carne', 'frango', 'peixe', 'linguica', 'bacon', 'presunto', 'queijo', 'mortadela', 'salsicha', 'hamburguer', '=gado', 'costela', 'picanha', '=file', 'coxa', '=peito', 'patinho', 'alcatra', 'salame', 'calabresa']],
+    ['Hortifrúti', ['fruta', 'verdura', 'legume', 'banana', '=maca', 'tomate', 'cebola', '=alho', 'batata', 'alface', 'cenoura', 'laranja', 'limao', 'mamao', '=uva', 'abacaxi', 'melancia', 'morango', 'couve', 'brocolis', 'pepino', 'abobrinha', 'hortifruti']],
+    ['Padaria e laticínios', ['=pao', '=paes', 'leite', 'iogurte', 'manteiga', 'margarina', 'requeijao', '=bolo', '=nata', 'torrada']],
+    ['Bebidas', ['=agua', 'suco', 'refrigerante', '=refri', 'cerveja', 'vinho', '=cha', 'energetico']],
+    ['Higiene', ['sabonete', 'shampoo', 'xampu', 'condicionador', 'pasta de dente', 'creme dental', 'escova', 'papel higienico', 'desodorante', 'absorvente', 'fralda', 'barbeador', 'higiene', 'fio dental', 'algodao', 'cotonete']],
+    ['Casa', ['lampada', 'pilha', '=vela', 'fosforo', 'papel toalha', 'guardanapo', 'papel aluminio']],
+    ['Pet', ['racao', '=areia', '=pet', '=gato', 'cachorro']]
+  ];
+  function categoriaSugerida(nome) {
+    const n = norm(nome);
+    for (const [cat, kws] of CAT_KW) for (const k of kws) {
+      const exato = k[0] === '='; const kw = exato ? k.slice(1) : k;
+      if (new RegExp('(^|[^a-z])' + kw + (exato ? '($|[^a-z])' : '')).test(n)) return cat;
+    }
+    return 'Outros';
+  }
+  const catDe = (i) => (i.categoria && CATS.includes(i.categoria) ? i.categoria : categoriaSugerida(i.nome));
+  const qtdDe = (i) => Math.max(1, parseInt(i.quantidade, 10) || 1);
   function mercadoTotais() {
     const itens = S.data.mercado_itens;
     const ativos = itens.filter((i) => i.ativo);
@@ -314,7 +356,14 @@
       ? API.select(t).then((r) => { S.semDesejos = false; return r; }).catch(() => { S.semDesejos = true; return []; })
       : API.select(t)));
     TABLES.forEach((t, i) => { S.data[t] = res[i] || []; });
+    if (!S.v4) {
+      S.v4 = (await API.temColunas('mercado_itens', 'categoria,quantidade,volta_em').catch(() => false))
+        && (await API.temColunas('pagamentos', 'pago,ajustado').catch(() => false));
+    }
     S.phase = 'app';
+    // Itens "em casa" com data para voltar: quando o mês chega, voltam sozinhos para a lista
+    if (S.v4) S.data.mercado_itens.filter((i) => !i.ativo && i.volta_em && i.volta_em <= ym())
+      .forEach((i) => upd('mercado_itens', i.id, { ativo: true, volta_em: null }));
   }
   let reloadTimer = null;
   function scheduleReload() {
@@ -327,8 +376,15 @@
   async function mut(fn, rollbackMsg = 'Não consegui salvar. Confira a internet e tente de novo.') {
     try { await fn(); } catch (e) { console.error(e); toast(rollbackMsg); await loadAll().catch(() => {}); render(); }
   }
-  const ins = (t, row) => { row.id = row.id || uuid(); row.familia_id = S.familia.id; row.criado_em = row.criado_em || new Date().toISOString(); S.data[t].push(row); return mut(() => API.insert(t, row)); };
-  const upd = (t, id, patch) => { const r = S.data[t].find((x) => x.id === id); if (r) Object.assign(r, patch); return mut(() => API.update(t, id, patch)); };
+  // Colunas da atualização 4: enquanto o banco não tiver, o app não envia esses campos
+  const V4_COLS = { mercado_itens: ['categoria', 'quantidade', 'volta_em'], pagamentos: ['pago', 'ajustado'] };
+  const limpa = (t, row) => { if (S.v4 || !V4_COLS[t]) return row; const r = { ...row }; V4_COLS[t].forEach((k) => delete r[k]); return r; };
+  const ins = (t, row) => { row.id = row.id || uuid(); row.familia_id = S.familia.id; row.criado_em = row.criado_em || new Date().toISOString(); S.data[t].push(row); return mut(() => API.insert(t, limpa(t, row))); };
+  const upd = (t, id, patch) => {
+    const r = S.data[t].find((x) => x.id === id); if (r) Object.assign(r, patch);
+    const envio = limpa(t, patch); if (!Object.keys(envio).length) return Promise.resolve();
+    return mut(() => API.update(t, id, envio));
+  };
   const del = (t, id) => {
     S.data[t] = S.data[t].filter((x) => x.id !== id);
     if (t === 'contas') S.data.pagamentos = S.data.pagamentos.filter((p) => p.conta_id !== id);
@@ -348,7 +404,7 @@
     const key = 'casa-aviso-' + todayISO(); if (lsGet(key)) return; lsSet(key, '1');
     const atras = v.filter((c) => c.dias < 0).length;
     const title = atras ? `${atras} conta${atras > 1 ? 's' : ''} atrasada${atras > 1 ? 's' : ''}` : `${v.length} conta${v.length > 1 ? 's vencem' : ' vence'} em breve`;
-    const body = v.slice(0, 4).map((c) => `${c.nome} · ${brl(c.valorMes)} · dia ${c.dia}`).join('\n');
+    const body = v.slice(0, 4).map((c) => `${c.nome} · ${brl(c.valorMes)} · dia ${pad(c.dia)}/${c.mes.slice(5)}`).join('\n');
     try {
       const reg = navigator.serviceWorker ? await navigator.serviceWorker.getRegistration() : null;
       if (reg) reg.showNotification(title, { body, icon: 'icons/icon-192.png', tag: 'casa-vencimentos' });
@@ -453,6 +509,7 @@
           <div class="brand"><img src="icons/icon.svg" alt="">${brandName(S.familia?.sobrenome)}</div>
           ${titulos[S.view] ? `<h1 class="mid" style="font-size:22px">${titulos[S.view]}</h1>` : '<span></span>'}
           <div class="actions">${temaBtn()}<a class="iconbtn" href="#ajustes" aria-label="Ajustes">${I.gear}</a></div>
+          ${S.view === 'mercado' ? resumoMercadoFixo() : ''}
         </header>
         <main id="main">${showMonth ? `<div class="month-row">${monthSwitch()}</div>` : ''}${inner}</main>
       </div>
@@ -470,12 +527,21 @@
     const atual = S.mes === ym();
     let alerta = '';
     const naoPagas = r.des.filter((c) => !c.pago);
-    if (atual) {
+    {
       const v = vencendo();
-      if (v.length) {
-        const atras = v.filter((c) => c.dias < 0);
-        const t = atras.length ? `${atras.length} conta${atras.length > 1 ? 's' : ''} atrasada${atras.length > 1 ? 's' : ''}` : `${v.length} conta${v.length > 1 ? 's vencem' : ' vence'} até dia ${Math.max(...v.map((c) => c.dia))}`;
-        alerta = `<a class="alert" href="#contas"><span class="ic">${I.bell}</span><span style="flex:1;min-width:0"><b>${t}</b><br><span class="small muted">${brl(sum(v, (c) => c.valorMes))} a pagar · toque para ver</span></span>${I.right.replace('<svg', '<svg width="18" height="18"')}</a>`;
+      const antigas = v.filter((c) => c.mes < ym());
+      const seta = I.right.replace('<svg', '<svg width="18" height="18"');
+      if (antigas.length && S.mes >= antigas[0].mes) {
+        const mesAnt = antigas[0].mes; const doMes = antigas.filter((c) => c.mes === mesAnt);
+        const outros = antigas.length - doMes.length;
+        alerta = `<button class="alert" data-act="ir-mes" data-mes="${mesAnt}" style="width:100%;text-align:left;cursor:pointer;font:inherit"><span class="ic">${I.bell}</span><span style="flex:1;min-width:0"><b>${doMes.length} conta${doMes.length > 1 ? 's' : ''} de ${MESES[Number(mesAnt.slice(5)) - 1]} sem pagar</b><br><span class="small muted">${brl(sum(doMes, (c) => c.valorMes))}${outros ? ` · e mais ${outros} em outros meses` : ''} · toque para ver</span></span>${seta}</button>`;
+      } else if (atual) {
+        const doMes = v.filter((c) => c.mes === ym());
+        if (doMes.length) {
+          const atras = doMes.filter((c) => c.dias < 0);
+          const t = atras.length ? `${atras.length} conta${atras.length > 1 ? 's' : ''} atrasada${atras.length > 1 ? 's' : ''}` : `${doMes.length} conta${doMes.length > 1 ? 's vencem' : ' vence'} até dia ${Math.max(...doMes.map((c) => c.dia))}`;
+          alerta = `<a class="alert" href="#contas"><span class="ic">${I.bell}</span><span style="flex:1;min-width:0"><b>${t}</b><br><span class="small muted">${brl(sum(doMes, (c) => c.valorMes))} a pagar · toque para ver</span></span>${seta}</a>`;
+        }
       }
     }
     if (!alerta && naoPagas.length) {
@@ -531,7 +597,7 @@
     if (c.pago) return ['Pago', ''];
     const d = prazo(c, S.mes);
     if (d === null) return [`Vence dia ${c.dia}`, ''];
-    if (d < 0) return [`Atrasada · dia ${c.dia}`, 'danger'];
+    if (d < 0) return [S.mes < ym() ? `Atrasada · venceu ${pad(c.dia)}/${S.mes.slice(5)}` : `Atrasada · dia ${c.dia}`, 'danger'];
     if (d === 0) return ['Vence hoje', ''];
     if (d === 1) return ['Vence amanhã', ''];
     return [`Vence dia ${c.dia}`, ''];
@@ -545,7 +611,7 @@
       const sub = [c.tipo, c.quem, c.parcelaTxt && `parcela ${c.parcelaTxt}`].filter(Boolean).join(' · ');
       return `<div class="item ${c.pago ? 'done' : ''}">
         <button class="check ${rec ? 'rec' : ''} ${c.pago ? 'on' : ''}" data-act="pagar" data-id="${c.id}" aria-pressed="${c.pago}" aria-label="${c.pago ? 'Desmarcar' : (rec ? 'Marcar como recebida' : 'Marcar como paga')}: ${h(c.nome)}">${c.pago ? I.check : ''}</button>
-        <div class="body" data-act="editar-conta" data-id="${c.id}" role="button" tabindex="0"><span class="title">${h(c.nome)}</span><span class="sub">${h(sub)}</span></div>
+        <div class="body" data-act="editar-conta" data-id="${c.id}" role="button" tabindex="0" aria-label="Editar ${h(c.nome)}"><span class="title">${h(c.nome)}</span><span class="sub">${h(sub)}${c.ajustado ? ' · valor só deste mês' : ''}</span></div>
         <div class="end"><span class="val num ${rec && !c.pago ? 'green' : ''}">${brl(c.valorMes)}</span><span class="when ${cls}">${st}</span></div>
       </div>`;
     }).join('');
@@ -559,34 +625,103 @@
         <button data-act="filtro" data-v="receita" aria-pressed="${rec}">Receitas (${r.rec.length})</button>
       </div>
       <div class="list">${items || `<div class="card empty"><span>Nada lançado em ${monthLabel(S.mes).toLowerCase()}.</span><button class="btn primary" data-act="nova-conta">${I.plus} Nova conta</button></div>`}</div>
-      <p class="hint">Toque no nome para editar. As contas que se repetem aparecem sozinhas nos próximos meses.</p>`;
+      <p class="hint">Toque no quadrado para marcar como ${rec ? 'recebida' : 'paga'}. Toque no nome para mudar valor, dia de vencimento ou apagar.</p>`;
   }
 
   // ---------------------------------------------------------------- Mercado
-  function viewMercado() {
+  // Total da lista, fixo no topo enquanto a pessoa rola e digita valores
+  function resumoMercadoFixo() {
     const t = mercadoTotais();
     const pct = t.limite ? Math.min(100, Math.round((t.total / t.limite) * 100)) : 0;
     const passou = t.sobra < 0;
-    const items = t.itens.map((i) => `<div class="item ${i.ativo ? '' : 'off'}">
-        <button class="switch" data-act="item-toggle" data-id="${i.id}" aria-pressed="${!!i.ativo}" aria-label="${i.ativo ? 'Tirar da lista' : 'Pôr na lista'}: ${h(i.nome)}"><span class="track"><span class="knob"></span></span></button>
-        <span class="title" style="flex:1;min-width:0">${h(i.nome)}</span>
-        <label class="money"><span>R$</span><input value="${fmtNum(i.valor)}" inputmode="decimal" data-change="item-valor" data-id="${i.id}" aria-label="Valor de ${h(i.nome)}"></label>
-        <button class="iconbtn" data-act="item-del" data-id="${i.id}" aria-label="Apagar ${h(i.nome)}">${I.trash}</button>
-      </div>`).join('');
+    return `<div class="subbar" id="subbar-mercado" aria-live="polite">
+      <div class="row"><span class="small muted">Lista de compras · ${t.ativos} ${t.ativos === 1 ? 'item' : 'itens'}</span><b class="mid num" style="font-size:20px">${brl(t.total)}</b></div>
+      <div class="bar"><span style="width:${pct}%"></span></div>
+      <div class="row small"><span class="muted">Limite do mês: ${brl(t.limite)}</span><b class="num ${passou ? 'orange' : 'green'}">${passou ? 'Passou ' + brl(-t.sobra) : 'Sobram ' + brl(t.sobra)}</b></div>
+    </div>`;
+  }
+  function atualizaMercadoAoVivo() {
+    const bar = $('#subbar-mercado'); if (bar) bar.outerHTML = resumoMercadoFixo();
+    document.querySelectorAll('[data-subtotal]').forEach((el) => {
+      el.textContent = brl(sum(S.data.mercado_itens.filter((i) => i.ativo && catDe(i) === el.dataset.subtotal), (i) => i.valor));
+    });
+  }
+  function opcoesVolta(sel) {
+    let out = `<option value="" ${!sel ? 'selected' : ''}>Aviso quando acabar</option>`;
+    let m = ym();
+    for (let k = 0; k < 6; k++) { m = addMonths(m, 1); out += `<option value="${m}" ${m === sel ? 'selected' : ''}>Volta em ${MESES[Number(m.slice(5)) - 1]}</option>`; }
+    if (sel && sel > m) out += `<option value="${sel}" selected>Volta em ${monthLabel(sel).toLowerCase()}</option>`;
+    return out;
+  }
+  function viewMercado() {
+    const emCasa = S.abaMercado === 'casa';
+    const todos = S.data.mercado_itens;
+    const nLista = todos.filter((i) => i.ativo).length; const nCasa = todos.length - nLista;
+    const itens = todos.filter((i) => (emCasa ? !i.ativo : i.ativo));
+    const grupos = CATS.map((cat) => [cat, itens.filter((i) => catDe(i) === cat).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }))]).filter(([, l]) => l.length);
+    const linha = (i) => {
+      const q = qtdDe(i);
+      if (emCasa) {
+        return `<div class="item wrap">
+          <div class="body" data-act="editar-item" data-id="${i.id}" role="button" tabindex="0" aria-label="Editar ${h(i.nome)}"><span class="title">${h(i.nome)}</span><span class="sub num">${q > 1 ? q + ' un · ' : ''}${Number(i.valor) ? 'última compra: ' + brl(i.valor) : 'sem valor'}</span></div>
+          ${S.v4 ? `<select class="input mini" data-change="item-volta" data-id="${i.id}" aria-label="Quando ${h(i.nome)} volta para a lista">${opcoesVolta(i.volta_em)}</select>` : ''}
+          <button class="btn mini" data-act="item-acabou" data-id="${i.id}" aria-label="${h(i.nome)} acabou: voltar para a lista">Acabou</button>
+        </div>`;
+      }
+      return `<div class="item">
+        <div class="body" data-act="editar-item" data-id="${i.id}" role="button" tabindex="0" aria-label="Editar ${h(i.nome)}" style="padding-left:6px"><span class="title">${h(i.nome)}</span>${q > 1 ? `<span class="sub num">${q} un · ${brl((Number(i.valor) || 0) / q)} cada</span>` : ''}</div>
+        <label class="money"><span>R$</span><input value="${fmtNum(i.valor)}" inputmode="numeric" data-money data-change="item-valor" data-id="${i.id}" aria-label="Valor total de ${h(i.nome)}"></label>
+        <button class="btn mini" data-act="item-casa" data-id="${i.id}" aria-label="Já tenho ${h(i.nome)} em casa: tirar da lista">Tenho</button>
+      </div>`;
+    };
+    const lista = grupos.map(([cat, l]) => `<div class="group-h"><span>${cat}</span>${emCasa ? `<span>${l.length}</span>` : `<span class="num" data-subtotal="${cat}">${brl(sum(l, (i) => i.valor))}</span>`}</div>${l.map(linha).join('')}`).join('');
+    const vazio = emCasa
+      ? '<div class="card empty"><span>Nada em casa por enquanto. Quando comprar algo que dura mais de um mês, toque em "Tenho" na lista de compras: o item vem para cá e sai da soma.</span></div>'
+      : '<div class="card empty"><span>A lista de compras está vazia. Adicione o que vocês costumam comprar.</span></div>';
     return `
-      <section class="card hero" ${passou ? 'style="border:2px solid var(--accent)"' : ''}>
-        <div class="row"><span class="label">Total da lista</span><span class="small muted">${t.ativos} de ${t.itens.length} itens</span></div>
-        <span class="big num">${brl(t.total)}</span>
-        <div class="bar"><span style="width:${pct}%"></span></div>
-        <b class="num ${passou ? 'orange' : 'green'}">${passou ? `Passou ${brl(-t.sobra)} do limite de ${brl(t.limite)}` : `Sobram ${brl(t.sobra)} do limite de ${brl(t.limite)}`}</b>
-      </section>
+      ${!S.v4 && !DEMO ? '<div class="alert"><span class="ic">' + I.bell + '</span><span class="small">Para guardar categoria, quantidade e a data de volta do estoque, rode o arquivo <b>supabase/atualizacao-4-mercado-e-contas.sql</b> no Supabase. Enquanto isso, a categoria é escolhida automaticamente pelo nome.</span></div>' : ''}
+      <div class="seg" role="group" aria-label="Qual lista">
+        <button data-act="aba-mercado" data-v="lista" aria-pressed="${!emCasa}">Comprar (${nLista})</button>
+        <button data-act="aba-mercado" data-v="casa" aria-pressed="${emCasa}">Em casa (${nCasa})</button>
+      </div>
       <form class="row" data-form="item-novo" style="gap:8px">
-        <input class="input" id="novo-item" name="nome" placeholder="Adicionar item…" aria-label="Nome do novo item" required style="flex:1;min-width:0">
-        <input class="input" id="novo-valor" name="valor" placeholder="R$ 0,00" inputmode="decimal" aria-label="Valor do item" style="width:110px">
-        <button class="btn primary" type="submit" aria-label="Adicionar item" style="padding:0 14px">${I.plus.replace('<svg', '<svg width="20" height="20"')}</button>
+        <input class="input" id="novo-item" name="nome" placeholder="${emCasa ? 'Adicionar ao estoque…' : 'Adicionar à lista…'}" aria-label="Nome do novo item" required autocomplete="off" style="flex:1;min-width:0">
+        ${emCasa ? '' : '<input class="input" id="novo-valor" name="valor" placeholder="0,00" inputmode="numeric" data-money aria-label="Valor do item" style="width:96px;text-align:right">'}
+        <button class="btn primary" type="submit" aria-label="Adicionar item" style="padding:0 14px">${I.plus}</button>
       </form>
-      <div class="list">${items || '<div class="card empty"><span>Sua lista está vazia. Adicione o que vocês compram todo mês; o que não for comprar, é só desligar.</span></div>'}</div>
-      <p class="hint">Desligue o que não vai comprar este mês; o item continua na lista para o próximo. O limite muda em Ajustes.</p>`;
+      <div class="list">${lista || vazio}</div>
+      <p class="hint">${emCasa
+        ? 'Itens em casa não entram na soma. Toque em "Acabou" para o item voltar para a lista de compras, ou escolha o mês em que ele volta sozinho.'
+        : 'Toque no nome para editar (nome, categoria, quantidade). Toque em "Tenho" quando já tiver o item em casa: ele sai da lista e vai para "Em casa".'}</p>`;
+  }
+  function sheetItem() {
+    const d = S.sheet.draft;
+    const q = qtdDe(d);
+    const cada = (Number(d.valor) || 0) / q;
+    return `<div class="sheet-head"><h2>Editar item</h2><button class="iconbtn" data-act="fechar" aria-label="Fechar">${I.x}</button></div>
+      <form class="form" data-form="item">
+        <div class="field"><label for="i-nome">Nome</label><input class="input" id="i-nome" name="nome" value="${h(d.nome)}" required autocomplete="off"></div>
+        ${S.v4 ? `<div class="field"><span class="lbl">Categoria</span><div class="chips">${CATS.map((c) => `<button type="button" class="chip" data-act="draft" data-k="categoria" data-v="${h(c)}" aria-pressed="${d.categoria === c}">${h(c)}</button>`).join('')}</div></div>
+        <div class="field"><label for="i-qtd">Quantidade</label>
+          <div class="stepper"><button type="button" class="btn" data-act="qtd" data-v="-1" aria-label="Diminuir quantidade">−</button><input class="input" id="i-qtd" name="quantidade" inputmode="numeric" data-sel value="${q}"><button type="button" class="btn" data-act="qtd" data-v="1" aria-label="Aumentar quantidade">+</button></div>
+        </div>` : ''}
+        <div class="pair">
+          ${S.v4 ? `<div class="field"><label for="i-cada">Preço de cada</label><input class="input" id="i-cada" name="cada" inputmode="numeric" data-money value="${fmtNum(cada)}"></div>` : ''}
+          <div class="field"><label for="i-total">${S.v4 ? 'Total' : 'Valor'}</label><input class="input" id="i-total" name="valor" inputmode="numeric" data-money value="${fmtNum(d.valor)}"></div>
+        </div>
+        ${S.v4 ? '<span class="hint">Total = quantidade × preço de cada. Se os itens têm preços diferentes (por exemplo, 5 carnes por R$ 100), digite só o total.</span>' : ''}
+        <div class="field"><span class="lbl">Onde está</span>
+          <div class="seg" role="group" aria-label="Onde está">
+            <button type="button" data-act="draft" data-k="onde" data-v="lista" aria-pressed="${d.onde !== 'casa'}">Na lista de compras</button>
+            <button type="button" data-act="draft" data-k="onde" data-v="casa" aria-pressed="${d.onde === 'casa'}">Em casa</button>
+          </div>
+        </div>
+        ${S.msg ? `<p class="error" role="alert">${h(S.msg)}</p>` : ''}
+        <div class="sheet-foot">
+          <button class="btn primary" type="submit">Salvar</button>
+          <button class="btn danger" type="button" data-act="apagar-item">${S.sheet.confirmDel ? 'Toque de novo para apagar' : 'Apagar item'}</button>
+        </div>
+      </form>`;
   }
 
   // ---------------------------------------------------------------- Reserva
@@ -663,7 +798,7 @@
     const chips = (arr, key) => arr.map(([v, l]) => `<button type="button" class="chip" data-act="draft" data-k="${key}" data-v="${h(v)}" aria-pressed="${d[key] === v}">${h(l)}</button>`).join('');
     return `<div class="sheet-head"><h2>${editando ? 'Editar desejo' : 'Novo desejo'}</h2><button class="iconbtn" data-act="fechar" aria-label="Fechar">${I.x}</button></div>
       <form class="form" data-form="desejo">
-        <div class="field" style="align-items:center"><label for="d-valor">Quanto custa (mais ou menos)</label><input class="input bigvalue num" id="d-valor" name="valor" inputmode="decimal" value="${d.valor ? fmtNum(d.valor) : ''}" placeholder="0,00"></div>
+        <div class="field" style="align-items:center"><label for="d-valor">Quanto custa (mais ou menos)</label><input class="input bigvalue num" id="d-valor" name="valor" inputmode="numeric" data-money value="${d.valor ? fmtNum(d.valor) : ''}" placeholder="0,00"></div>
         <div class="field"><label for="d-nome">O que é</label><input class="input" id="d-nome" name="nome" value="${h(d.nome)}" placeholder="Ex.: Ar-condicionado do quarto" required></div>
         <div class="field"><span class="lbl">Prioridade</span><div class="chips">${chips([['alta', 'Alta'], ['media', 'Média'], ['baixa', 'Baixa']], 'prioridade')}</div></div>
         <div class="field"><span class="lbl">Para quem</span><div class="chips">${chips(quemOpcoes().map((q) => [q, q]), 'quem')}</div></div>
@@ -743,9 +878,9 @@
         <h2>Família</h2>
         <div class="field"><label for="aj-sob">Sobrenome</label><input class="input" id="aj-sob" name="sobrenome" value="${h(f.sobrenome)}" required></div>
         <div class="field"><label for="aj-nome">Seu nome</label><input class="input" id="aj-nome" name="nome" value="${h(S.membro?.nome)}" required></div>
-        <div class="field"><label for="aj-lim">Limite do mercado por mês</label><input class="input" id="aj-lim" name="limite_mercado" inputmode="decimal" value="${fmtNum(f.limite_mercado)}"></div>
-        <div class="field"><label for="aj-ap">Aporte na reserva por mês</label><input class="input" id="aj-ap" name="aporte_mensal" inputmode="decimal" value="${fmtNum(f.aporte_mensal)}"></div>
-        <div class="field"><label for="aj-meta">Meta da reserva</label><input class="input" id="aj-meta" name="meta_reserva" inputmode="decimal" value="${fmtNum(f.meta_reserva)}"></div>
+        <div class="field"><label for="aj-lim">Limite do mercado por mês</label><input class="input" id="aj-lim" name="limite_mercado" inputmode="numeric" data-money value="${fmtNum(f.limite_mercado)}"></div>
+        <div class="field"><label for="aj-ap">Aporte na reserva por mês</label><input class="input" id="aj-ap" name="aporte_mensal" inputmode="numeric" data-money value="${fmtNum(f.aporte_mensal)}"></div>
+        <div class="field"><label for="aj-meta">Meta da reserva</label><input class="input" id="aj-meta" name="meta_reserva" inputmode="numeric" data-money value="${fmtNum(f.meta_reserva)}"></div>
         <button class="btn primary" type="submit">Salvar</button>
       </form>
       <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
@@ -801,36 +936,68 @@
     return [...set];
   }
   const TIPOS = { despesa: ['Fixa', 'Cartão', 'Parcela', 'Mercado', 'Outros'], receita: ['Salário', 'Extra', 'Outros'] };
+  // Mês sugerido para uma conta nova: se o dia já passou neste mês, a primeira vence no mês que vem
+  function inicioSugerido(dia, natureza) {
+    if (natureza === 'despesa' && S.mes === ym() && (Number(dia) || 0) < new Date().getDate()) return addMonths(S.mes, 1);
+    return S.mes;
+  }
+  function hintInicio(d) {
+    const dia = Math.max(1, Math.min(31, parseInt(d.dia, 10) || 1));
+    const ini = d.inicio || S.mes;
+    const data = `${pad(Math.min(dia, daysInMonth(ini)))}/${ini.slice(5)}/${ini.slice(0, 4)}`;
+    if (d.natureza === 'receita') return `Entra pela primeira vez em ${data}.`;
+    let t = `Primeiro vencimento: ${data}.`;
+    if (!d.id && d.inicioAuto && ini !== S.mes) t += ` O dia ${dia} de ${MESES[Number(S.mes.slice(5)) - 1]} já passou, por isso começa em ${MESES[Number(ini.slice(5)) - 1]}. Se ainda vai pagar a de ${MESES[Number(S.mes.slice(5)) - 1]}, troque o mês acima.`;
+    return t;
+  }
+  function opcoesMes(sel) {
+    const hoje = ym();
+    let m = [sel, S.mes, addMonths(hoje, -12)].sort()[0];
+    const fim = addMonths([hoje, S.mes, sel].sort()[2], 12);
+    let out = '';
+    for (; m <= fim; m = addMonths(m, 1)) out += `<option value="${m}" ${m === sel ? 'selected' : ''}>${monthLabel(m)}</option>`;
+    return out;
+  }
   function sheetConta() {
     const d = S.sheet.draft;
     const nat = d.natureza;
     const chips = (arr, key) => arr.map((v) => `<button type="button" class="chip" data-act="draft" data-k="${key}" data-v="${h(v)}" aria-pressed="${d[key] === v}">${h(v)}</button>`).join('');
-    const rep = [['mensal', 'Todo mês'], ['unica', 'Só este mês'], ['parcelado', 'Parcelado']];
+    const rep = [['mensal', 'Todo mês'], ['unica', 'Uma vez só'], ['parcelado', 'Parcelado']];
     const editando = !!d.id;
     const podeEncerrar = editando && d.recorrencia !== 'unica' && S.mes > d.inicio;
+    const escolheEscopo = editando && S.v4 && d.recorrencia !== 'unica';
+    const mesCurto = monthShort(S.mes);
     return `<div class="sheet-head"><h2>${editando ? 'Editar' : 'Nova'} ${nat === 'receita' ? 'receita' : 'conta'}</h2><button class="iconbtn" data-act="fechar" aria-label="Fechar">${I.x}</button></div>
       <form class="form" data-form="conta">
         <div class="seg nat" role="group" aria-label="Tipo de lançamento">
           <button type="button" data-act="draft" data-k="natureza" data-v="despesa" aria-pressed="${nat === 'despesa'}">Despesa</button>
           <button type="button" data-act="draft" data-k="natureza" data-v="receita" aria-pressed="${nat === 'receita'}">Receita</button>
         </div>
-        <div class="field" style="align-items:center"><label for="c-valor">Valor</label><input class="input bigvalue num ${nat === 'receita' ? 'green' : ''}" id="c-valor" name="valor" inputmode="decimal" value="${d.valor ? fmtNum(d.valor) : ''}" placeholder="0,00" required></div>
+        <div class="field" style="align-items:center"><label for="c-valor">Valor${editando && d.recorrencia !== 'unica' ? ` em ${monthLabel(S.mes).toLowerCase()}` : ''}</label><input class="input bigvalue num ${nat === 'receita' ? 'green' : ''}" id="c-valor" name="valor" inputmode="numeric" data-money value="${d.valor ? fmtNum(d.valor) : ''}" placeholder="0,00" required>
+          ${escolheEscopo ? `<div class="seg" role="group" aria-label="Se mudar o valor, vale para" style="width:100%">
+            <button type="button" data-act="draft" data-k="escopo" data-v="mes" aria-pressed="${d.escopo === 'mes'}">Só em ${mesCurto}</button>
+            <button type="button" data-act="draft" data-k="escopo" data-v="sempre" aria-pressed="${d.escopo !== 'mes'}">Todos os meses</button>
+          </div><span class="hint">${d.escopo === 'mes' ? `Se mudar o valor, muda só em ${monthLabel(S.mes).toLowerCase()} (bom para conta de luz, água, cartão).` : 'Se mudar o valor, vale para todos os meses que ainda não foram pagos.'}</span>` : ''}
+        </div>
         <div class="two">
           <div class="field"><label for="c-nome">Descrição</label><input class="input" id="c-nome" name="nome" value="${h(d.nome)}" placeholder="${nat === 'receita' ? 'Ex.: Salário' : 'Ex.: Conta de luz'}" required></div>
-          <div class="field"><label for="c-dia">${nat === 'receita' ? 'Cai dia' : 'Vence dia'}</label><input class="input" id="c-dia" name="dia" inputmode="numeric" value="${h(d.dia)}" required></div>
+          <div class="field"><label for="c-dia">${nat === 'receita' ? 'Cai dia' : 'Vence dia'}</label><input class="input" id="c-dia" name="dia" inputmode="numeric" data-sel value="${h(d.dia)}" required></div>
+        </div>
+        <div class="field"><label for="c-inicio">${d.recorrencia === 'unica' ? 'Em qual mês' : (nat === 'receita' ? 'Começa em' : 'Primeiro vencimento em')}</label>
+          <select class="input" id="c-inicio" name="inicio">${opcoesMes(d.inicio || S.mes)}</select>
+          <span class="hint" id="c-inicio-hint">${hintInicio(d)}</span>
         </div>
         <div class="field"><span class="lbl">Tipo</span><div class="chips">${chips(TIPOS[nat], 'tipo')}</div></div>
         <div class="field"><span class="lbl">De quem é</span><div class="chips">${chips(quemOpcoes(), 'quem')}</div></div>
         <div class="field"><span class="lbl">Repetir</span>
           <div class="seg" role="group" aria-label="Repetir">${rep.map(([v, l]) => `<button type="button" data-act="draft" data-k="recorrencia" data-v="${v}" aria-pressed="${d.recorrencia === v}">${l}</button>`).join('')}</div>
-          ${d.recorrencia === 'parcelado' ? `<div class="two" style="margin-top:6px"><label for="c-parc" class="lbl" style="align-self:center">Número de parcelas</label><input class="input" id="c-parc" name="parcelas" inputmode="numeric" value="${h(d.parcelas || 2)}"></div>` : ''}
-          <span class="hint">${editando ? `Começou em ${monthLabel(d.inicio).toLowerCase()}.` : `Começa em ${monthLabel(S.mes).toLowerCase()}.`}${editando && d.recorrencia !== 'unica' ? ' Mudar o valor vale para os meses ainda não pagos.' : ''}</span>
+          ${d.recorrencia === 'parcelado' ? `<div class="two" style="margin-top:6px"><label for="c-parc" class="lbl" style="align-self:center">Número de parcelas</label><input class="input" id="c-parc" name="parcelas" inputmode="numeric" data-sel value="${h(d.parcelas || 2)}"></div>` : ''}
         </div>
         ${S.msg ? `<p class="error" role="alert">${h(S.msg)}</p>` : ''}
         <div class="sheet-foot">
           <button class="btn primary" type="submit">Salvar</button>
-          ${podeEncerrar ? `<button class="btn" type="button" data-act="encerrar-conta">Parar a partir de ${monthShort(S.mes)}</button>` : ''}
-          ${editando ? `<button class="btn danger" type="button" data-act="excluir-conta">${S.sheet.confirmDel ? 'Toque de novo para apagar' : 'Apagar'}</button>` : ''}
+          ${podeEncerrar ? `<button class="btn" type="button" data-act="encerrar-conta">Parar a partir de ${mesCurto}</button>` : ''}
+          ${editando ? `<button class="btn danger" type="button" data-act="excluir-conta">${S.sheet.confirmDel ? 'Toque de novo para apagar' : 'Apagar de todos os meses'}</button>` : ''}
         </div>
       </form>`;
   }
@@ -838,7 +1005,7 @@
     const d = S.sheet.draft;
     return `<div class="sheet-head"><h2>Registrar aporte</h2><button class="iconbtn" data-act="fechar" aria-label="Fechar">${I.x}</button></div>
       <form class="form" data-form="aporte">
-        <div class="field" style="align-items:center"><label for="a-valor">Valor colocado</label><input class="input bigvalue num blue" id="a-valor" name="valor" inputmode="decimal" placeholder="0,00" value="${d.valor ? fmtNum(d.valor) : ''}" required></div>
+        <div class="field" style="align-items:center"><label for="a-valor">Valor colocado</label><input class="input bigvalue num blue" id="a-valor" name="valor" inputmode="numeric" data-money placeholder="0,00" value="${d.valor ? fmtNum(d.valor) : ''}" required></div>
         <div class="field"><label for="a-apl">Aplicação</label><select class="input" id="a-apl" name="aplicacao_id">${S.data.aplicacoes.map((a) => `<option value="${a.id}">${h(a.nome)}</option>`).join('')}</select></div>
         <div class="field"><label for="a-data">Data</label><input class="input" id="a-data" name="data" type="date" value="${todayISO()}" required></div>
         <div class="sheet-foot"><button class="btn blue" type="submit">Salvar aporte</button></div>
@@ -854,7 +1021,7 @@
           <div class="field"><label for="p-inst">Onde (banco / produto)</label><input class="input" id="p-inst" name="instituicao" value="${h(d.instituicao)}" placeholder="Ex.: CDB do Nubank"></div>
           <div class="field"><label for="p-pct">% do CDI</label><input class="input" id="p-pct" name="pct_cdi" inputmode="decimal" value="${fmtNum(d.pct_cdi ?? 100)}"></div>
         </div>
-        <div class="field"><label for="p-saldo">${editando ? 'Saldo no extrato hoje' : 'Quanto já tem aplicado hoje'}</label><input class="input" id="p-saldo" name="saldo" inputmode="decimal" placeholder="${editando ? fmtNum(info.estimado) : '0,00'}" value="${editando ? '' : fmtNum(d.saldo_base || 0)}">
+        <div class="field"><label for="p-saldo">${editando ? 'Saldo no extrato hoje' : 'Quanto já tem aplicado hoje'}</label><input class="input" id="p-saldo" name="saldo" inputmode="numeric" data-money placeholder="${editando ? fmtNum(info.estimado) : '0,00'}" value="${editando ? '' : fmtNum(d.saldo_base || 0)}">
           <span class="hint">${editando ? `O app estima ${brl(info.estimado)}. Se o extrato mostrar outro valor, digite aqui e ele passa a contar a partir de hoje. Deixe vazio para não mudar.` : 'Os aportes que você registrar depois somam em cima desse valor.'}</span></div>
         <div class="sheet-foot">
           <button class="btn primary" type="submit">Salvar</button>
@@ -866,7 +1033,7 @@
     let root = $('#sheet-root');
     if (!root) { root = document.createElement('div'); root.id = 'sheet-root'; document.body.appendChild(root); }
     if (!S.sheet) { root.innerHTML = ''; document.body.style.overflow = ''; return; }
-    const html = S.sheet.type === 'conta' ? sheetConta() : S.sheet.type === 'aporte' ? sheetAporte() : S.sheet.type === 'desejo' ? sheetDesejo() : sheetAplicacao();
+    const html = S.sheet.type === 'conta' ? sheetConta() : S.sheet.type === 'aporte' ? sheetAporte() : S.sheet.type === 'desejo' ? sheetDesejo() : S.sheet.type === 'item' ? sheetItem() : sheetAplicacao();
     root.innerHTML = `<div class="sheet-back" data-act="fechar-fora"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;
     document.body.style.overflow = 'hidden';
   }
@@ -879,7 +1046,7 @@
       else S.sheet.draft[k] = v;
     }
   }
-  function openSheet(type, draft) { S.msg = ''; S.sheet = { type, draft, confirmDel: false }; renderSheet(); setTimeout(() => { const f = $('#sheet-root input:not([type=hidden])'); if (f && matchMedia('(min-width: 900px)').matches) f.focus(); }, 30); }
+  function openSheet(type, draft) { S.msg = ''; S.sheet = { type, draft, confirmDel: false }; const tt = $('#toast'); if (tt) tt.hidden = true; renderSheet(); setTimeout(() => { const f = $('#sheet-root input:not([type=hidden])'); if (f && matchMedia('(min-width: 900px)').matches) f.focus(); }, 30); }
   function closeSheet() { S.sheet = null; S.msg = ''; renderSheet(); if (S.pendingRender) render(); if (typeof checarVersao === 'function') setTimeout(checarVersao, 500); }
 
   // ---------------------------------------------------------------- render
@@ -918,16 +1085,26 @@
     logout: async () => { await API.signOut(); S.phase = 'auth'; S.authView = 'login'; S.familia = null; S.membro = null; lsDel('casa-view'); render(); },
     mes: (el) => { S.mes = addMonths(S.mes, Number(el.dataset.v)); render(); },
     filtro: (el) => { S.filtroContas = el.dataset.v; render(); },
-    'nova-conta': () => openSheet('conta', { natureza: S.view === 'contas' && S.filtroContas === 'receita' ? 'receita' : 'despesa', valor: 0, nome: '', dia: 10, tipo: S.view === 'contas' && S.filtroContas === 'receita' ? 'Salário' : 'Fixa', quem: 'Casa', recorrencia: 'mensal', parcelas: 2 }),
+    'nova-conta': () => {
+      const rec = S.view === 'contas' && S.filtroContas === 'receita';
+      const hoje = S.mes === ym() ? new Date().getDate() : 10;
+      const nat = rec ? 'receita' : 'despesa';
+      openSheet('conta', { natureza: nat, valor: 0, nome: '', dia: hoje, tipo: rec ? 'Salário' : 'Fixa', quem: 'Casa', recorrencia: 'mensal', parcelas: 2, inicio: inicioSugerido(hoje, nat), inicioAuto: true });
+    },
     'editar-conta': (el) => {
       const c = S.data.contas.find((x) => x.id === el.dataset.id); if (!c) return;
-      openSheet('conta', { ...c, valor: Number(c.valor) });
+      const cm = contasDoMes(S.mes).find((x) => x.id === c.id);
+      const valor = cm ? cm.valorMes : Number(c.valor);
+      openSheet('conta', { ...c, valor, valor0: valor, escopo: cm && cm.ajustado ? 'mes' : 'sempre' });
     },
+    'ir-mes': (el) => { S.mes = el.dataset.mes; S.filtroContas = 'despesa'; if (S.view === 'contas') render(); else location.hash = 'contas'; },
     draft: (el) => {
       syncDraft();
       const k = el.dataset.k; const v = el.dataset.v;
-      S.sheet.draft[k] = v;
-      if (k === 'natureza' && !TIPOS[v].includes(S.sheet.draft.tipo)) S.sheet.draft.tipo = TIPOS[v][0];
+      const d = S.sheet.draft;
+      d[k] = v;
+      if (k === 'natureza' && !TIPOS[v].includes(d.tipo)) d.tipo = TIPOS[v][0];
+      if (S.sheet.type === 'conta' && !d.id && d.inicioAuto) d.inicio = inicioSugerido(d.dia, d.natureza);
       renderSheet();
     },
     fechar: () => closeSheet(),
@@ -935,8 +1112,10 @@
     pagar: (el) => {
       const id = el.dataset.id;
       const c = contasDoMes(S.mes).find((x) => x.id === id); if (!c) return;
-      if (c.pago) del('pagamentos', c.pagId);
-      else ins('pagamentos', { conta_id: id, mes: S.mes, valor: c.valorMes });
+      const p = S.data.pagamentos.find((x) => x.conta_id === id && x.mes === S.mes);
+      if (c.pago) { if (p && p.ajustado) upd('pagamentos', p.id, { pago: false }); else if (p) del('pagamentos', p.id); }
+      else if (p) upd('pagamentos', p.id, { pago: true });
+      else ins('pagamentos', { conta_id: id, mes: S.mes, valor: c.valorMes, pago: true, ajustado: false });
       render();
     },
     'encerrar-conta': () => {
@@ -948,8 +1127,33 @@
       if (!S.sheet.confirmDel) { syncDraft(); S.sheet.confirmDel = true; renderSheet(); return; }
       const d = S.sheet.draft; del('contas', d.id); closeSheet(); render(); toast('Conta apagada.');
     },
-    'item-toggle': (el) => { const i = S.data.mercado_itens.find((x) => x.id === el.dataset.id); if (!i) return; upd('mercado_itens', i.id, { ativo: !i.ativo }); render(); },
-    'item-del': (el) => { del('mercado_itens', el.dataset.id); render(); },
+    'aba-mercado': (el) => { S.abaMercado = el.dataset.v; render(); },
+    'item-casa': (el) => {
+      const i = S.data.mercado_itens.find((x) => x.id === el.dataset.id); if (!i) return;
+      upd('mercado_itens', i.id, { ativo: false, volta_em: null }); render();
+      toast(`${i.nome} saiu da lista e foi para "Em casa".`);
+    },
+    'item-acabou': (el) => {
+      const i = S.data.mercado_itens.find((x) => x.id === el.dataset.id); if (!i) return;
+      upd('mercado_itens', i.id, { ativo: true, volta_em: null }); render();
+      toast(`${i.nome} voltou para a lista de compras.`);
+    },
+    'editar-item': (el) => {
+      const i = S.data.mercado_itens.find((x) => x.id === el.dataset.id); if (!i) return;
+      openSheet('item', { ...i, valor: Number(i.valor) || 0, quantidade: qtdDe(i), categoria: catDe(i), onde: i.ativo ? 'lista' : 'casa' });
+    },
+    qtd: (el) => {
+      syncDraft();
+      const d = S.sheet.draft;
+      const cada = parseMoney(d.cada);
+      const q = Math.max(1, (parseInt(d.quantidade, 10) || 1) + Number(el.dataset.v));
+      d.quantidade = q; d.valor = Math.round(q * cada * 100) / 100;
+      renderSheet();
+    },
+    'apagar-item': () => {
+      if (!S.sheet.confirmDel) { syncDraft(); S.sheet.confirmDel = true; renderSheet(); return; }
+      const d = S.sheet.draft; del('mercado_itens', d.id); closeSheet(); render(); toast(`${d.nome} apagado.`);
+    },
     'novo-aporte': () => openSheet('aporte', { valor: S.familia?.aporte_mensal || 0 }),
     'novo-desejo': () => openSheet('desejo', { nome: '', valor: 0, prioridade: 'media', quem: 'Casa', link: '' }),
     'editar-desejo': (el) => { const d = S.data.desejos.find((x) => x.id === el.dataset.id); if (d) openSheet('desejo', { ...d, valor: Number(d.valor) }); },
@@ -995,14 +1199,60 @@
     if (ev.key === 'Escape' && S.sheet) closeSheet();
     if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.matches('[role="button"][data-act]')) { ev.preventDefault(); ev.target.click(); }
   });
+  // Ao tocar num campo de valor ou número, seleciona tudo: é só digitar por cima
+  const selecionavel = (el) => el && el.matches && el.matches('input[data-money], input[data-sel]');
+  document.addEventListener('focusin', (ev) => {
+    const el = ev.target; if (!selecionavel(el)) return;
+    el.dataset.recemFocado = '1';
+    try { el.select(); } catch { /* sem seleção */ }
+  });
+  // O clique que deu o foco colocaria o cursor no meio do texto: refaz a seleção uma vez
+  document.addEventListener('click', (ev) => {
+    const el = ev.target; if (!selecionavel(el) || !el.dataset.recemFocado) return;
+    delete el.dataset.recemFocado;
+    try { el.select(); } catch { /* sem seleção */ }
+  });
+  document.addEventListener('focusout', (ev) => { if (selecionavel(ev.target)) delete ev.target.dataset.recemFocado; });
   document.addEventListener('input', (ev) => {
-    if (ev.target.dataset.live === 'sobrenome') { const pv = $('#pv-sobrenome'); if (pv) pv.textContent = ev.target.value.trim() || 'Sua família'; }
+    const el = ev.target;
+    if (el.dataset.live === 'sobrenome') { const pv = $('#pv-sobrenome'); if (pv) pv.textContent = el.value.trim() || 'Sua família'; }
+    // Campo de dinheiro: digita só os números e a vírgula entra sozinha (2890 vira 28,90)
+    if (el.matches('input[data-money]')) {
+      const dg = el.value.replace(/\D/g, '').replace(/^0+/, '').slice(0, 11);
+      el.value = dg ? fmtNum(parseInt(dg, 10) / 100) : '';
+    }
+    if (el.dataset.change === 'item-valor') {
+      const it = S.data.mercado_itens.find((x) => x.id === el.dataset.id);
+      if (it) { it.valor = parseMoney(el.value); atualizaMercadoAoVivo(); }
+    }
+    if (S.sheet && S.sheet.type === 'conta' && el.id === 'c-dia') {
+      const d = S.sheet.draft; d.dia = el.value;
+      if (!d.id && d.inicioAuto) { d.inicio = inicioSugerido(d.dia, d.natureza); const sel = $('#c-inicio'); if (sel) sel.value = d.inicio; }
+      const hint = $('#c-inicio-hint'); if (hint) hint.textContent = hintInicio(d);
+    }
+    if (S.sheet && S.sheet.type === 'item' && ['i-qtd', 'i-cada', 'i-total'].includes(el.id)) {
+      const q = Math.max(1, parseInt($('#i-qtd')?.value, 10) || 1);
+      const cadaEl = $('#i-cada'); const totEl = $('#i-total');
+      if (cadaEl && totEl) {
+        if (el.id === 'i-total') cadaEl.value = fmtNum(parseMoney(totEl.value) / q);
+        else totEl.value = fmtNum(Math.round(q * parseMoney(cadaEl.value) * 100) / 100);
+      }
+    }
   });
   document.addEventListener('change', (ev) => {
     const el = ev.target;
     if (el.dataset.change === 'item-valor') {
       const v = parseMoney(el.value); upd('mercado_itens', el.dataset.id, { valor: v }); el.value = fmtNum(v);
+      atualizaMercadoAoVivo();
       S.pendingRender = true; setTimeout(safeRender, 0);
+    }
+    if (el.dataset.change === 'item-volta') {
+      upd('mercado_itens', el.dataset.id, { volta_em: el.value || null });
+      S.pendingRender = true; setTimeout(safeRender, 0);
+    }
+    if (S.sheet && S.sheet.type === 'conta' && el.id === 'c-inicio') {
+      const d = S.sheet.draft; d.inicio = el.value; d.inicioAuto = false;
+      const hint = $('#c-inicio-hint'); if (hint) hint.textContent = hintInicio(d);
     }
   });
 
@@ -1044,13 +1294,29 @@
       const nome = String(fd.get('nome') || '').trim();
       if (!nome) { S.msg = 'Escreva a descrição.'; renderSheet(); return; }
       if (!(valor > 0)) { S.msg = 'Digite um valor maior que zero.'; renderSheet(); return; }
+      const inicio = /^\d{4}-\d{2}$/.test(String(d.inicio || '')) ? d.inicio : S.mes;
       const row = {
-        nome, valor, dia, natureza: d.natureza, tipo: d.tipo, quem: d.quem, recorrencia: d.recorrencia,
+        nome, dia, natureza: d.natureza, tipo: d.tipo, quem: d.quem, recorrencia: d.recorrencia, inicio,
         parcelas: d.recorrencia === 'parcelado' ? Math.max(1, parseInt(fd.get('parcelas'), 10) || 2) : null
       };
-      if (d.id) upd('contas', d.id, row);
-      else ins('contas', { ...row, inicio: S.mes, fim: null });
-      closeSheet(); render(); toast(d.id ? 'Conta atualizada.' : 'Conta lançada.');
+      if (!d.id) ins('contas', { ...row, valor, fim: null });
+      else {
+        const p = S.data.pagamentos.find((x) => x.conta_id === d.id && x.mes === S.mes);
+        const mudou = Math.abs(valor - Number(d.valor0 ?? d.valor)) > 0.004;
+        const soMes = mudou && S.v4 && d.recorrencia !== 'unica' && d.escopo === 'mes';
+        if (mudou && !soMes) row.valor = valor;
+        upd('contas', d.id, row);
+        if (soMes) {
+          if (p) upd('pagamentos', p.id, { valor, ajustado: true });
+          else ins('pagamentos', { conta_id: d.id, mes: S.mes, valor, pago: false, ajustado: true });
+        } else if (mudou && p) {
+          if (p.ajustado && p.pago === false) del('pagamentos', p.id);
+          else upd('pagamentos', p.id, { valor, ajustado: false });
+        }
+      }
+      const fora = inicio > S.mes;
+      closeSheet(); render();
+      toast(fora ? `${d.id ? 'Conta atualizada' : 'Conta lançada'}: aparece a partir de ${monthLabel(inicio).toLowerCase()}.` : (d.id ? 'Conta atualizada.' : 'Conta lançada.'));
     },
     async aporte(fd) {
       const valor = parseMoney(fd.get('valor'));
@@ -1081,9 +1347,25 @@
     },
     async 'item-novo'(fd, form) {
       const nome = String(fd.get('nome') || '').trim(); if (!nome) return;
-      ins('mercado_itens', { nome, valor: parseMoney(fd.get('valor')), ativo: true });
-      render(); const f = $('#novo-item'); if (f) f.focus();
-      form.reset();
+      const igual = S.data.mercado_itens.find((x) => norm(x.nome) === norm(nome));
+      if (igual) { toast(`${igual.nome} já está em "${igual.ativo ? 'Comprar' : 'Em casa'}".`); return; }
+      const cat = categoriaSugerida(nome);
+      const naLista = S.abaMercado !== 'casa';
+      ins('mercado_itens', { nome, valor: parseMoney(fd.get('valor')), ativo: naLista, categoria: cat, quantidade: 1, volta_em: null });
+      form.reset(); render();
+      const f = $('#novo-item'); if (f) f.focus();
+      toast(naLista ? `${nome} entrou em ${cat}. Lista: ${brl(mercadoTotais().total)}` : `${nome} guardado em "Em casa".`);
+    },
+    async item(fd) {
+      syncDraft();
+      const d = S.sheet.draft;
+      const nome = String(fd.get('nome') || '').trim();
+      if (!nome) { S.msg = 'Escreva o nome do item.'; renderSheet(); return; }
+      const naLista = d.onde !== 'casa';
+      const patch = { nome, valor: parseMoney(fd.get('valor')), ativo: naLista, categoria: CATS.includes(d.categoria) ? d.categoria : categoriaSugerida(nome), quantidade: Math.max(1, parseInt(fd.get('quantidade'), 10) || 1) };
+      if (naLista) patch.volta_em = null;
+      upd('mercado_itens', d.id, patch);
+      closeSheet(); render(); toast('Item atualizado.');
     },
     async 'excluir-usuario'(fd) {
       if (String(fd.get('confirmacao') || '').trim().toUpperCase() !== 'EXCLUIR') { toast('Digite EXCLUIR para confirmar.'); return; }
@@ -1148,8 +1430,10 @@
     await loadAll();
     if (S.phase === 'app') {
       const v = location.hash.replace('#', ''); S.view = VIEWS.includes(v) ? v : 'painel';
-      // Se o mês atual ainda não tem contas, abre no primeiro mês que tem
-      if (!contasDoMes(S.mes).length) {
+      // Abre no mês mais antigo que ainda tem conta sem pagar; senão, no mês atual
+      const pend = mesComPendencia();
+      if (pend) S.mes = pend;
+      else if (!contasDoMes(S.mes).length) {
         const futuros = S.data.contas.map((c) => c.inicio).filter((m) => m > S.mes).sort();
         if (futuros.length) S.mes = futuros[0];
       }

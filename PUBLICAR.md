@@ -46,4 +46,4 @@ Tudo gratuito. Leva uns 20 minutos.
 
 ## Atualizações do banco
 
-Se você instalou antes de 08/11/2026, rode também `supabase/atualizacao-2-exclusao-segura.sql` no SQL Editor (ativa o botão "Excluir minha conta").
+Se você instalou uma versão anterior, rode no SQL Editor os arquivos `supabase/atualizacao-2-exclusao-segura.sql`, `atualizacao-3-desejos.sql` e `atualizacao-4-mercado-e-contas.sql`, nessa ordem. Todos podem ser rodados mais de uma vez sem problema.
