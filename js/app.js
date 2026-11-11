@@ -523,7 +523,6 @@
   function viewPainel() {
     const r = resumo(S.mes);
     const mt = mercadoTotais(); const rv = reservaTotais();
-    const livre = r.sobra - mt.limite - rv.plano;
     const atual = S.mes === ym();
     let alerta = '';
     const naoPagas = r.des.filter((c) => !c.pago);
@@ -564,11 +563,7 @@
           <div class="pill"><span class="small muted">Receitas</span><span class="v num">${brl(r.R)}</span></div>
           <div class="pill"><span class="small muted">Despesas</span><span class="v num">${brl(r.D)}</span></div>
         </div>
-        <div class="steps" aria-label="Divisão da sobra">
-          <div class="st-orange"><b>1º Mercado</b><span class="num">${brl(mt.limite)}</span></div>
-          <div class="st-blue"><b>2º Reserva</b><span class="num">${brl(rv.plano)}</span></div>
-          <div class="${livre >= 0 ? 'st-green' : 'st-red'}"><b>${livre >= 0 ? '3º Livre' : 'Faltam'}</b><span class="num">${brl(Math.abs(livre))}</span></div>
-        </div>
+        <span class="small muted">${r.sobra >= 0 ? 'É o que fica livre depois de todas as contas do mês.' : 'As despesas do mês estão maiores que as receitas.'}</span>
       </section>
       <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
         ${alerta}
@@ -732,13 +727,13 @@
       .sort((a, b) => (PRIO[a.prioridade]?.[1] ?? 1) - (PRIO[b.prioridade]?.[1] ?? 1) || (a.ordem || 0) - (b.ordem || 0) || String(a.criado_em).localeCompare(String(b.criado_em)));
   }
   function livrePorMes() {
-    // primeiro mês (de hoje até 6 meses à frente) em que sobra dinheiro livre depois do mercado e da reserva
-    const fixo = (Number(S.familia?.limite_mercado) || 0) + (Number(S.familia?.aporte_mensal) || 0);
+    // primeiro mês (de hoje até 6 meses à frente) em que sobra dinheiro depois de todas as contas
+    // (mercado e aporte na reserva entram como contas fixas, então não são descontados de novo)
     let m = ym();
     for (let i = 0; i < 7; i++, m = addMonths(m, 1)) {
       const r = resumo(m);
       if (!r.l.length) continue;
-      const livre = r.sobra - fixo;
+      const livre = r.sobra;
       if (livre > 0) return { livre, mes: m, atual: i === 0 };
     }
     return { livre: 0, mes: ym(), atual: true };
@@ -746,10 +741,10 @@
   function mesesPara(valor) {
     const { livre, mes, atual } = livrePorMes(); const v = Number(valor) || 0;
     if (!v) return { n: 0, txt: 'Sem valor definido' };
-    if (livre <= 0) return { n: null, txt: 'Nos próximos meses não sobra dinheiro livre depois do mercado e da reserva' };
+    if (livre <= 0) return { n: null, txt: 'Nos próximos meses não sobra dinheiro depois das contas' };
     const n = Math.ceil(v / livre);
     const quando = atual ? 'do mês' : `de ${MESES[Number(mes.slice(5)) - 1]} em diante`;
-    return { n, txt: n <= 1 ? `<b class="green">Cabe no livre ${quando}</b> (${brl(livre)})` : `Juntando o livre ${quando} (${brl(livre)}/mês), dá em <b class="green">${n} meses</b>` };
+    return { n, txt: n <= 1 ? `<b class="green">Cabe na sobra ${quando}</b> (${brl(livre)})` : `Juntando a sobra ${quando} (${brl(livre)}/mês), dá em <b class="green">${n} meses</b>` };
   }
   const linkSeguro = (u) => { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : ''; } catch { return ''; } };
   function viewDesejos() {
@@ -787,7 +782,7 @@
         <div class="card"><span class="small muted">Total</span><span class="mid num">${brl(total)}</span></div>
       </div>
       <div class="list">${pend.map(item).join('') || `<div class="card empty"><span>Nenhum desejo na lista ainda. Anote o que vocês querem comprar e em que ordem.</span><button class="btn primary" data-act="novo-desejo">${I.plus} Adicionar desejo</button></div>`}</div>
-      <p class="hint">Toque no quadrado quando comprar. Use as setas para mudar a ordem dentro da mesma prioridade. "Livre do mês" é o que sobra depois do mercado e do aporte na reserva.</p>
+      <p class="hint">Toque no quadrado quando comprar. Use as setas para mudar a ordem dentro da mesma prioridade. "Sobra do mês" é o que fica depois de todas as contas.</p>
       ${comprados.length ? `<section class="card"><h2>Já compramos</h2><div class="list">${comprados.map((d) => `<div class="item done">
         <button class="check on" data-act="desejo-comprado" data-id="${d.id}" aria-label="Voltar para a lista: ${h(d.nome)}">${I.check}</button>
         <div class="body" data-act="editar-desejo" data-id="${d.id}" role="button" tabindex="0"><span class="title">${h(d.nome)}</span><span class="sub">${d.comprado_em ? 'Comprado em ' + dateBR(d.comprado_em) : 'Comprado'}</span></div>
@@ -854,14 +849,6 @@
         <span class="small muted">${quando ? `Chega na meta em <b class="blue">${monthLabel(quando.m).toLowerCase()}</b>.` : 'Com esse aporte, a meta passa de 12 meses.'} Estimativa bruta, antes do imposto.</span>
       </section>
     </div>
-    <section class="card">
-      <h2>Regra do salário</h2>
-      <div class="steps">
-        <div class="st-orange"><b>1º</b>Separar o mercado</div>
-        <div class="st-blue"><b>2º</b>Aporte na reserva</div>
-        <div class="st-green"><b>3º</b>O resto é livre</div>
-      </div>
-    </section>
     <section class="card"><h2>Onde está o dinheiro</h2><div class="list">${apls || '<span class="muted small">Nenhuma aplicação ainda. Toque em "Nova aplicação".</span>'}</div>
       <span class="hint">Toque numa aplicação para conferir o saldo pelo extrato do banco.</span></section>
     ${aportes ? `<section class="card"><h2>Últimos aportes</h2><div class="list">${aportes}</div></section>` : ''}`;
