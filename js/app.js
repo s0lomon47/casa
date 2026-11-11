@@ -494,6 +494,14 @@
   const temaBtn = () => temaEscuro()
     ? `<button class="iconbtn" data-act="tema-toggle" aria-label="Usar tema claro" title="Tema claro">${I.sun}</button>`
     : `<button class="iconbtn" data-act="tema-toggle" aria-label="Usar tema escuro" title="Tema escuro">${I.moon}</button>`;
+  // Quanto ainda está disponível no mês atual, sempre visível no topo
+  function disponivelFixo() {
+    const m = ym();
+    if (S.view === 'painel' && S.mes === m) return '';
+    const r = resumo(m); if (!r.l.length) return '';
+    return `<a class="subbar dispo" href="#painel" data-act="ir-hoje" aria-label="Disponível em ${MESES[Number(m.slice(5)) - 1]}: ${brl(r.sobra)}. Abrir o painel">
+      <span class="small muted">Disponível em ${MESES[Number(m.slice(5)) - 1]}</span><b class="num ${r.sobra >= 0 ? 'green' : 'danger'}">${brl(r.sobra)}</b></a>`;
+  }
   function shell(inner) {
     const titulos = { painel: 'Painel', contas: 'Contas', mercado: 'Mercado', desejos: 'Desejos', reserva: 'Reserva', ajustes: 'Ajustes' };
     const showMonth = S.view === 'painel' || S.view === 'contas';
@@ -509,6 +517,7 @@
           <div class="brand"><img src="icons/icon.svg" alt="">${brandName(S.familia?.sobrenome)}</div>
           ${titulos[S.view] ? `<h1 class="mid" style="font-size:22px">${titulos[S.view]}</h1>` : '<span></span>'}
           <div class="actions">${temaBtn()}<a class="iconbtn" href="#ajustes" aria-label="Ajustes">${I.gear}</a></div>
+          ${disponivelFixo()}
           ${S.view === 'mercado' ? resumoMercadoFixo() : ''}
         </header>
         <main id="main">${showMonth ? `<div class="month-row">${monthSwitch()}</div>` : ''}${inner}</main>
@@ -557,13 +566,14 @@
     return `
     <div class="grid">
       <section class="card hero" aria-label="Sobra do mês">
-        <span class="label">Sobra do mês</span>
+        <span class="label">Disponível no mês</span>
         <span class="big num ${r.sobra >= 0 ? 'green' : 'danger'}">${brl(r.sobra)}</span>
         <div class="pair">
           <div class="pill"><span class="small muted">Receitas</span><span class="v num">${brl(r.R)}</span></div>
           <div class="pill"><span class="small muted">Despesas</span><span class="v num">${brl(r.D)}</span></div>
         </div>
-        <span class="small muted">${r.sobra >= 0 ? 'É o que fica livre depois de todas as contas do mês.' : 'As despesas do mês estão maiores que as receitas.'}</span>
+        <span class="small muted">${r.sobra >= 0 ? 'Receitas menos todas as contas e gastos lançados no mês.' : 'As despesas do mês estão maiores que as receitas.'}${r.aPagar > 0 ? ` Ainda falta pagar ${brl(r.aPagar)}.` : ''}</span>
+        <button class="btn" data-act="novo-gasto" style="align-self:flex-start">${I.plus} Lançar um gasto</button>
       </section>
       <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
         ${alerta}
@@ -954,7 +964,7 @@
     const podeEncerrar = editando && d.recorrencia !== 'unica' && S.mes > d.inicio;
     const escolheEscopo = editando && S.v4 && d.recorrencia !== 'unica';
     const mesCurto = monthShort(S.mes);
-    return `<div class="sheet-head"><h2>${editando ? 'Editar' : 'Nova'} ${nat === 'receita' ? 'receita' : 'conta'}</h2><button class="iconbtn" data-act="fechar" aria-label="Fechar">${I.x}</button></div>
+    return `<div class="sheet-head"><h2>${editando ? 'Editar' : (d.gasto && nat === 'despesa' ? 'Novo' : 'Nova')} ${nat === 'receita' ? 'receita' : (d.gasto && !editando ? 'gasto' : 'conta')}</h2><button class="iconbtn" data-act="fechar" aria-label="Fechar">${I.x}</button></div>
       <form class="form" data-form="conta">
         <div class="seg nat" role="group" aria-label="Tipo de lançamento">
           <button type="button" data-act="draft" data-k="natureza" data-v="despesa" aria-pressed="${nat === 'despesa'}">Despesa</button>
@@ -974,6 +984,11 @@
           <select class="input" id="c-inicio" name="inicio">${opcoesMes(d.inicio || S.mes)}</select>
           <span class="hint" id="c-inicio-hint">${hintInicio(d)}</span>
         </div>
+        ${editando ? '' : `<div class="field"><span class="lbl">${nat === 'receita' ? 'Já recebeu?' : 'Já pagou?'}</span>
+          <div class="seg" role="group" aria-label="${nat === 'receita' ? 'Já recebeu' : 'Já pagou'}">
+            <button type="button" data-act="draft" data-k="jaPago" data-v="nao" aria-pressed="${d.jaPago !== 'sim'}">Ainda não</button>
+            <button type="button" data-act="draft" data-k="jaPago" data-v="sim" aria-pressed="${d.jaPago === 'sim'}">${nat === 'receita' ? 'Já recebi' : 'Já paguei'}</button>
+          </div></div>`}
         <div class="field"><span class="lbl">Tipo</span><div class="chips">${chips(TIPOS[nat], 'tipo')}</div></div>
         <div class="field"><span class="lbl">De quem é</span><div class="chips">${chips(quemOpcoes(), 'quem')}</div></div>
         <div class="field"><span class="lbl">Repetir</span>
@@ -1076,8 +1091,11 @@
       const rec = S.view === 'contas' && S.filtroContas === 'receita';
       const hoje = S.mes === ym() ? new Date().getDate() : 10;
       const nat = rec ? 'receita' : 'despesa';
-      openSheet('conta', { natureza: nat, valor: 0, nome: '', dia: hoje, tipo: rec ? 'Salário' : 'Fixa', quem: 'Casa', recorrencia: 'mensal', parcelas: 2, inicio: inicioSugerido(hoje, nat), inicioAuto: true });
+      openSheet('conta', { natureza: nat, valor: 0, nome: '', dia: hoje, tipo: rec ? 'Salário' : 'Fixa', quem: 'Casa', recorrencia: 'mensal', parcelas: 2, inicio: inicioSugerido(hoje, nat), inicioAuto: true, jaPago: 'nao' });
     },
+    // Gasto do dia a dia: uma vez só, de hoje, já pago. Desconta na hora do disponível do mês
+    'novo-gasto': () => openSheet('conta', { natureza: 'despesa', valor: 0, nome: '', dia: new Date().getDate(), tipo: 'Outros', quem: S.membro?.nome || 'Casa', recorrencia: 'unica', parcelas: 2, inicio: ym(), inicioAuto: false, jaPago: 'sim', gasto: true }),
+    'ir-hoje': () => { S.mes = ym(); if (S.view === 'painel') render(); else location.hash = 'painel'; },
     'editar-conta': (el) => {
       const c = S.data.contas.find((x) => x.id === el.dataset.id); if (!c) return;
       const cm = contasDoMes(S.mes).find((x) => x.id === c.id);
@@ -1286,7 +1304,16 @@
         nome, dia, natureza: d.natureza, tipo: d.tipo, quem: d.quem, recorrencia: d.recorrencia, inicio,
         parcelas: d.recorrencia === 'parcelado' ? Math.max(1, parseInt(fd.get('parcelas'), 10) || 2) : null
       };
-      if (!d.id) ins('contas', { ...row, valor, fim: null });
+      if (!d.id) {
+        const nova = { ...row, valor, fim: null };
+        const salvo = ins('contas', nova);
+        if (d.jaPago === 'sim') {
+          // marca o primeiro mês como pago (grava depois que a conta existir no banco)
+          const pg = { id: uuid(), familia_id: S.familia.id, conta_id: nova.id, mes: inicio, valor, pago: true, ajustado: false, criado_em: new Date().toISOString() };
+          S.data.pagamentos.push(pg);
+          salvo.then(() => mut(() => API.insert('pagamentos', limpa('pagamentos', pg))));
+        }
+      }
       else {
         const p = S.data.pagamentos.find((x) => x.conta_id === d.id && x.mes === S.mes);
         const mudou = Math.abs(valor - Number(d.valor0 ?? d.valor)) > 0.004;
