@@ -290,3 +290,19 @@ select.input.mini { height: 40px; font-size: 13px; padding: 0 8px; min-width: 0;
 /* Disponível do mês, fixo no topo */
 .subbar.dispo { flex-direction: row; justify-content: space-between; align-items: center; gap: 12px; color: var(--fg); padding: 2px 0; }
 .subbar.dispo b { font-size: 16px; }
+
+/* ---------- Balanço do mês e contas em uma tela ---------- */
+.bal { display: flex; flex-direction: column; gap: 6px; }
+.bal-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 15px; }
+.bal-row > span { color: var(--muted); }
+.bal-row a { margin-left: 6px; }
+.bal-total { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; border-top: 1px solid var(--line); padding-top: 10px; margin-top: 2px; flex-wrap: wrap; }
+.bal-total > span { font-weight: 600; }
+.balanco .big { font-size: 32px; }
+.cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (min-width: 760px) { .cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.col-h { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; padding: 0 4px; }
+.col-h h2 { font-size: 18px; }
+.col-h > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.btn.add { align-self: flex-start; color: var(--accent-text); border-style: dashed; }

@@ -46,4 +46,4 @@ Tudo gratuito. Leva uns 20 minutos.
 
 ## Atualizações do banco
 
-Se você instalou uma versão anterior, rode no SQL Editor os arquivos `supabase/atualizacao-2-exclusao-segura.sql`, `atualizacao-3-desejos.sql` e `atualizacao-4-mercado-e-contas.sql`, nessa ordem. Todos podem ser rodados mais de uma vez sem problema.
+Se você instalou uma versão anterior, rode no SQL Editor os arquivos `supabase/atualizacao-2-exclusao-segura.sql`, `atualizacao-3-desejos.sql`, `atualizacao-4-mercado-e-contas.sql` e `atualizacao-5-saldo-entre-meses.sql`, nessa ordem. Todos podem ser rodados mais de uma vez sem problema.

@@ -1,6 +1,6 @@
 // Ca$a — service worker: abre rápido e funciona mesmo com internet fraca.
 // Dados (Supabase e Banco Central) sempre vêm da rede.
-const CACHE = 'casa-v8';
+const CACHE = 'casa-v9';
 const SHELL = ['./', 'index.html', 'css/styles.css', 'js/app.js', 'js/config.js', 'manifest.webmanifest',
   'privacidade.html', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png', 'favicon.ico'];
 

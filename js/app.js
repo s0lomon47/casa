@@ -108,11 +108,11 @@
 
   // ---------------------------------------------------------------- backend: demonstração (só neste navegador)
   function demoBackend() {
-    const KEY = 'casa-demo-v3';
+    const KEY = 'casa-demo-v4';
     const now = () => new Date().toISOString();
     // Família fictícia, com valores inventados, só para demonstração
     const seed = () => {
-      const f = { id: uuid(), sobrenome: 'Silva', codigo_convite: 'DEMO42', limite_mercado: 900, aporte_mensal: 1000, meta_reserva: 15000 };
+      const f = { id: uuid(), sobrenome: 'Silva', codigo_convite: 'DEMO42', limite_mercado: 900, aporte_mensal: 1000, meta_reserva: 15000, saldo_desde: null, saldo_inicial: 0 };
       const me = { user_id: 'demo-user', familia_id: f.id, nome: 'Ana', criado_em: now() };
       const c = (nome, valor, natureza, tipo, quem, recorrencia = 'mensal', parcelas = null) =>
         ({ id: uuid(), familia_id: f.id, nome, valor, natureza, tipo, quem, dia: 10, recorrencia, inicio: ym(), parcelas, fim: null, criado_em: now() });
@@ -230,6 +230,24 @@
     const aPagar = sum(des.filter((c) => !c.pago), (c) => c.valorMes);
     return { l, rec, des, R, D, sobra: R - D, aPagar, pago: D - aPagar };
   }
+  // Saldo que passa de um mês para o seguinte
+  const temSaldoCols = () => !!S.familia && Object.prototype.hasOwnProperty.call(S.familia, 'saldo_desde');
+  function inicioSaldo() {
+    const f = S.familia || {};
+    if (/^\d{4}-\d{2}$/.test(String(f.saldo_desde || ''))) return f.saldo_desde;
+    return S.data.contas.map((c) => c.inicio).filter(Boolean).sort()[0] || ym();
+  }
+  function saldoAnterior(m) {
+    const base = inicioSaldo();
+    if (m < base) return 0;
+    let saldo = Number(S.familia?.saldo_inicial) || 0;
+    let k = base; let n = 0;
+    for (; k < m && n < 600; k = addMonths(k, 1), n++) saldo += resumo(k).sobra;
+    return Math.round(saldo * 100) / 100;
+  }
+  function balanco(m) { const r = resumo(m); const ant = saldoAnterior(m); return { ...r, ant, final: Math.round((ant + r.sobra) * 100) / 100, base: inicioSaldo() }; }
+  const nomeMes = (m) => MESES[Number(m.slice(5)) - 1];
+
   function prazo(c, m) {
     // dias até vencer: negativo = atrasada; null = mês futuro
     const hoje = ym();
@@ -498,9 +516,9 @@
   function disponivelFixo() {
     const m = ym();
     if (S.view === 'painel' && S.mes === m) return '';
-    const r = resumo(m); if (!r.l.length) return '';
-    return `<a class="subbar dispo" href="#painel" data-act="ir-hoje" aria-label="Disponível em ${MESES[Number(m.slice(5)) - 1]}: ${brl(r.sobra)}. Abrir o painel">
-      <span class="small muted">Disponível em ${MESES[Number(m.slice(5)) - 1]}</span><b class="num ${r.sobra >= 0 ? 'green' : 'danger'}">${brl(r.sobra)}</b></a>`;
+    const b = balanco(m); if (!b.l.length && !b.ant) return '';
+    return `<a class="subbar dispo" href="#painel" data-act="ir-hoje" aria-label="Disponível em ${nomeMes(m)}: ${brl(b.final)}. Abrir o painel">
+      <span class="small muted">Disponível em ${nomeMes(m)}</span><b class="num ${b.final >= 0 ? 'green' : 'danger'}">${brl(b.final)}</b></a>`;
   }
   function shell(inner) {
     const titulos = { painel: 'Painel', contas: 'Contas', mercado: 'Mercado', desejos: 'Desejos', reserva: 'Reserva', ajustes: 'Ajustes' };
@@ -529,8 +547,18 @@
   }
 
   // ---------------------------------------------------------------- Painel
+  // Linhas do balanço: sobra do mês anterior + receitas − despesas
+  function balancoLinhas(b, m) {
+    const mostraAnt = b.ant !== 0 || m > b.base;
+    return `<div class="bal">
+      ${mostraAnt ? `<div class="bal-row"><span>${b.ant >= 0 ? 'Sobrou' : 'Faltou'} de ${nomeMes(addMonths(m, -1))} <a class="small" href="#ajustes" aria-label="Ajustar o saldo entre meses">ajustar</a></span><b class="num ${b.ant < 0 ? 'danger' : ''}">${b.ant < 0 ? '− ' : ''}${brl(Math.abs(b.ant))}</b></div>` : ''}
+      <div class="bal-row"><span>+ Receitas</span><b class="num green">${brl(b.R)}</b></div>
+      <div class="bal-row"><span>− Despesas</span><b class="num">${brl(b.D)}</b></div>
+    </div>`;
+  }
   function viewPainel() {
     const r = resumo(S.mes);
+    const bal = balanco(S.mes);
     const mt = mercadoTotais(); const rv = reservaTotais();
     const atual = S.mes === ym();
     let alerta = '';
@@ -558,21 +586,18 @@
     } else if (!alerta && r.des.length) {
       alerta = `<div class="alert ok"><span class="ic">${I.ok}</span><span><b>Tudo pago em ${monthLabel(S.mes).toLowerCase()}</b></span></div>`;
     }
-    if (!r.l.length) {
+    if (!r.l.length && !bal.ant) {
       return `<div class="card empty"><h2>Nenhuma conta em ${monthLabel(S.mes).toLowerCase()}</h2><p style="margin:0">Lance o salário, o aluguel e as outras contas. As que se repetem aparecem sozinhas nos próximos meses.</p><button class="btn primary" data-act="nova-conta">${I.plus} Lançar primeira conta</button></div>`;
     }
     const pctMerc = mt.limite ? Math.min(100, Math.round((mt.total / mt.limite) * 100)) : 0;
     const pctRes = rv.meta ? Math.min(100, Math.round((rv.estimado / rv.meta) * 100)) : 0;
     return `
     <div class="grid">
-      <section class="card hero" aria-label="Sobra do mês">
-        <span class="label">Disponível no mês</span>
-        <span class="big num ${r.sobra >= 0 ? 'green' : 'danger'}">${brl(r.sobra)}</span>
-        <div class="pair">
-          <div class="pill"><span class="small muted">Receitas</span><span class="v num">${brl(r.R)}</span></div>
-          <div class="pill"><span class="small muted">Despesas</span><span class="v num">${brl(r.D)}</span></div>
-        </div>
-        <span class="small muted">${r.sobra >= 0 ? 'Receitas menos todas as contas e gastos lançados no mês.' : 'As despesas do mês estão maiores que as receitas.'}${r.aPagar > 0 ? ` Ainda falta pagar ${brl(r.aPagar)}.` : ''}</span>
+      <section class="card hero" aria-label="Disponível em ${nomeMes(S.mes)}">
+        <span class="label">Disponível em ${nomeMes(S.mes)}</span>
+        <span class="big num ${bal.final >= 0 ? 'green' : 'danger'}">${brl(bal.final)}</span>
+        ${balancoLinhas(bal, S.mes)}
+        <span class="small muted">É o que sobra depois de todas as contas e gastos lançados, e passa para ${nomeMes(addMonths(S.mes, 1))}.${r.aPagar > 0 ? ` Ainda falta pagar ${brl(r.aPagar)}.` : ''}</span>
         <button class="btn" data-act="novo-gasto" style="align-self:flex-start">${I.plus} Lançar um gasto</button>
       </section>
       <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
@@ -607,30 +632,44 @@
     if (d === 1) return ['Vence amanhã', ''];
     return [`Vence dia ${c.dia}`, ''];
   }
+  function linhaConta(c) {
+    const rec = c.natureza === 'receita';
+    const [st, cls] = statusConta(c);
+    const sub = [c.tipo, c.quem, c.parcelaTxt && `parcela ${c.parcelaTxt}`].filter(Boolean).join(' · ');
+    return `<div class="item ${c.pago ? 'done' : ''}">
+      <button class="check ${rec ? 'rec' : ''} ${c.pago ? 'on' : ''}" data-act="pagar" data-id="${c.id}" aria-pressed="${c.pago}" aria-label="${c.pago ? 'Desmarcar' : (rec ? 'Marcar como recebida' : 'Marcar como paga')}: ${h(c.nome)}">${c.pago ? I.check : ''}</button>
+      <div class="body" data-act="editar-conta" data-id="${c.id}" role="button" tabindex="0" aria-label="Editar ${h(c.nome)}"><span class="title">${h(c.nome)}</span><span class="sub">${h(sub)}${c.ajustado ? ' · valor só deste mês' : ''}</span></div>
+      <div class="end"><span class="val num ${rec && !c.pago ? 'green' : ''}">${brl(c.valorMes)}</span><span class="when ${cls}">${st}</span></div>
+    </div>`;
+  }
   function viewContas() {
-    const r = resumo(S.mes);
-    const rec = S.filtroContas === 'receita';
-    const lista = (rec ? r.rec : r.des).slice().sort((a, b) => (a.pago - b.pago) || (a.dia - b.dia) || (b.valorMes - a.valorMes));
-    const items = lista.map((c) => {
-      const [st, cls] = statusConta(c);
-      const sub = [c.tipo, c.quem, c.parcelaTxt && `parcela ${c.parcelaTxt}`].filter(Boolean).join(' · ');
-      return `<div class="item ${c.pago ? 'done' : ''}">
-        <button class="check ${rec ? 'rec' : ''} ${c.pago ? 'on' : ''}" data-act="pagar" data-id="${c.id}" aria-pressed="${c.pago}" aria-label="${c.pago ? 'Desmarcar' : (rec ? 'Marcar como recebida' : 'Marcar como paga')}: ${h(c.nome)}">${c.pago ? I.check : ''}</button>
-        <div class="body" data-act="editar-conta" data-id="${c.id}" role="button" tabindex="0" aria-label="Editar ${h(c.nome)}"><span class="title">${h(c.nome)}</span><span class="sub">${h(sub)}${c.ajustado ? ' · valor só deste mês' : ''}</span></div>
-        <div class="end"><span class="val num ${rec && !c.pago ? 'green' : ''}">${brl(c.valorMes)}</span><span class="when ${cls}">${st}</span></div>
-      </div>`;
-    }).join('');
+    const b = balanco(S.mes);
+    const prox = addMonths(S.mes, 1);
+    const recs = b.rec.slice().sort((x, y) => (x.dia - y.dia) || (y.valorMes - x.valorMes));
+    const dess = b.des.slice().sort((x, y) => (x.pago - y.pago) || (x.dia - y.dia) || (y.valorMes - x.valorMes));
+    const aReceber = sum(b.rec.filter((c) => !c.pago), (c) => c.valorMes);
+    const coluna = (tipo, lista, total, falta) => {
+      const rec = tipo === 'receita';
+      return `<section class="col" aria-label="${rec ? 'Receitas' : 'Despesas'}">
+        <div class="col-h">
+          <div><h2>${rec ? 'Receitas' : 'Despesas'}</h2><span class="small muted">${falta > 0 ? `${rec ? 'A receber' : 'A pagar'}: <b class="num ${rec ? 'green' : 'orange'}">${brl(falta)}</b>` : (lista.length ? (rec ? 'Tudo recebido' : 'Tudo pago') : '')}</span></div>
+          <b class="num ${rec ? 'green' : ''}" style="font-size:18px">${brl(total)}</b>
+        </div>
+        <div class="list">${lista.map(linhaConta).join('') || `<span class="small muted" style="padding:8px 4px">Nenhuma ${rec ? 'receita' : 'despesa'} em ${nomeMes(S.mes)}.</span>`}</div>
+        <button class="btn ghost add" data-act="nova-conta" data-nat="${tipo}">${I.plus} ${rec ? 'Nova receita' : 'Nova despesa'}</button>
+      </section>`;
+    };
     return `
-      <div class="pair">
-        <div class="card"><span class="small muted">${rec ? 'A receber' : 'A pagar'}</span><span class="mid num ${rec ? 'green' : 'orange'}">${brl(rec ? sum(r.rec.filter((c) => !c.pago), (c) => c.valorMes) : r.aPagar)}</span></div>
-        <div class="card"><span class="small muted">${rec ? 'Recebido' : 'Pago'}</span><span class="mid num">${brl(rec ? sum(r.rec.filter((c) => c.pago), (c) => c.valorMes) : r.pago)}</span></div>
+      <section class="card hero balanco" aria-label="Balanço de ${nomeMes(S.mes)}">
+        <span class="label">Balanço de ${nomeMes(S.mes)}</span>
+        ${balancoLinhas(b, S.mes)}
+        <div class="bal-total"><span>Fica para ${nomeMes(prox)}</span><b class="big num ${b.final >= 0 ? 'green' : 'danger'}">${b.final < 0 ? '− ' : ''}${brl(Math.abs(b.final))}</b></div>
+      </section>
+      <div class="cols">
+        ${coluna('receita', recs, b.R, aReceber)}
+        ${coluna('despesa', dess, b.D, b.aPagar)}
       </div>
-      <div class="seg" role="group" aria-label="Mostrar">
-        <button data-act="filtro" data-v="despesa" aria-pressed="${!rec}">Despesas (${r.des.length})</button>
-        <button data-act="filtro" data-v="receita" aria-pressed="${rec}">Receitas (${r.rec.length})</button>
-      </div>
-      <div class="list">${items || `<div class="card empty"><span>Nada lançado em ${monthLabel(S.mes).toLowerCase()}.</span><button class="btn primary" data-act="nova-conta">${I.plus} Nova conta</button></div>`}</div>
-      <p class="hint">Toque no quadrado para marcar como ${rec ? 'recebida' : 'paga'}. Toque no nome para mudar valor, dia de vencimento ou apagar.</p>`;
+      <p class="hint">Toque no quadrado para marcar como paga ou recebida. Toque no nome para mudar valor, dia de vencimento ou apagar. O que sobra (ou falta) num mês passa para o seguinte.</p>`;
   }
 
   // ---------------------------------------------------------------- Mercado
@@ -881,6 +920,13 @@
         <button class="btn primary" type="submit">Salvar</button>
       </form>
       <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+        ${temSaldoCols() || DEMO ? `<form class="card form" data-form="ajustes-saldo">
+          <h2>Saldo entre meses</h2>
+          <span class="small muted">O que sobra (ou falta) num mês passa para o seguinte. Escolha a partir de quando começar a contar e quanto vocês já tinham nesse mês.</span>
+          <div class="field"><label for="aj-desde">Começar a contar em</label><select class="input" id="aj-desde" name="saldo_desde">${opcoesMes(inicioSaldo())}</select></div>
+          <div class="field"><label for="aj-saldo">Saldo que já tinham no começo desse mês</label><input class="input" id="aj-saldo" name="saldo_inicial" inputmode="numeric" data-money value="${fmtNum(f.saldo_inicial || 0)}"><span class="hint">Pode deixar zero. Se o saldo for negativo, lance a diferença como uma despesa no mês.</span></div>
+          <button class="btn primary" type="submit">Salvar</button>
+        </form>` : `<section class="card"><h2>Saldo entre meses</h2><span class="small">Para escolher a partir de quando a sobra passa de um mês para o outro, rode o arquivo <b>supabase/atualizacao-5-saldo-entre-meses.sql</b> no Supabase. Por enquanto a conta começa no primeiro mês com lançamentos.</span></section>`}
         <section class="card">
           <h2>Convidar alguém da casa</h2>
           <span class="small muted">Na tela de cadastro, a pessoa cria a conta, escolhe "Tenho um código" e digita:</span>
@@ -1086,9 +1132,8 @@
     'onb-tab': (el) => { S.onboardTab = el.dataset.v; S.msg = ''; render(); },
     logout: async () => { await API.signOut(); S.phase = 'auth'; S.authView = 'login'; S.familia = null; S.membro = null; lsDel('casa-view'); render(); },
     mes: (el) => { S.mes = addMonths(S.mes, Number(el.dataset.v)); render(); },
-    filtro: (el) => { S.filtroContas = el.dataset.v; render(); },
-    'nova-conta': () => {
-      const rec = S.view === 'contas' && S.filtroContas === 'receita';
+    'nova-conta': (el) => {
+      const rec = el && el.dataset && el.dataset.nat === 'receita';
       const hoje = S.mes === ym() ? new Date().getDate() : 10;
       const nat = rec ? 'receita' : 'despesa';
       openSheet('conta', { natureza: nat, valor: 0, nome: '', dia: hoje, tipo: rec ? 'Salário' : 'Fixa', quem: 'Casa', recorrencia: 'mensal', parcelas: 2, inicio: inicioSugerido(hoje, nat), inicioAuto: true, jaPago: 'nao' });
@@ -1388,6 +1433,13 @@
       S.phase = 'auth'; S.authView = 'login'; S.familia = null; S.membro = null;
       TABLES.forEach((t) => { S.data[t] = []; });
       render(); toast('Sua conta foi excluída.');
+    },
+    async 'ajustes-saldo'(fd) {
+      const desde = String(fd.get('saldo_desde') || '');
+      const patch = { saldo_desde: /^\d{4}-\d{2}$/.test(desde) ? desde : null, saldo_inicial: parseMoney(fd.get('saldo_inicial')) };
+      Object.assign(S.familia, patch);
+      await mut(() => API.updateFamilia(S.familia.id, patch));
+      render(); toast(`Saldo contado a partir de ${monthLabel(inicioSaldo()).toLowerCase()}.`);
     },
     async 'ajustes-familia'(fd) {
       const patch = {

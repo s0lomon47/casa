@@ -14,8 +14,13 @@ create table if not exists public.familias (
   limite_mercado  numeric(12,2) not null default 700,
   aporte_mensal   numeric(12,2) not null default 1000,
   meta_reserva    numeric(12,2) not null default 11000,
+  saldo_desde     text,                              -- mês em que começa a contar o saldo entre meses
+  saldo_inicial   numeric(14,2) not null default 0,
   criado_em       timestamptz not null default now()
 );
+
+alter table public.familias add column if not exists saldo_desde   text;
+alter table public.familias add column if not exists saldo_inicial numeric(14,2) not null default 0;
 
 -- Quem faz parte de cada família (1 pessoa = 1 família)
 create table if not exists public.membros (
